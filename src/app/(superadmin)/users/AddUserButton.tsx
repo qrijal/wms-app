@@ -15,7 +15,7 @@ export default function AddUserButton({ warehouses }: { warehouses: any[] }) {
     email: '',
     password: '',
     password_confirm: '',
-    role: 'admin',   // default tetap admin
+    role: 'admin',
   })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -51,7 +51,7 @@ export default function AddUserButton({ warehouses }: { warehouses: any[] }) {
           full_name: form.full_name,
           email: form.email,
           password: form.password,
-          role: form.role,        // kirim role yang dipilih
+          role: form.role,
         }),
       })
       if (!res.ok) {
@@ -73,7 +73,7 @@ export default function AddUserButton({ warehouses }: { warehouses: any[] }) {
       <Button onClick={() => setOpen(true)}>Tambah User</Button>
       {open && (
         <Modal onClose={() => setOpen(false)} title="Tambah User Baru">
-          <form onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit} className="space-y-4">
             {error && <Alert type="error" message={error} />}
 
             <Select
@@ -95,7 +95,7 @@ export default function AddUserButton({ warehouses }: { warehouses: any[] }) {
             <Input label="Password" type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
             <Input label="Konfirmasi Password" type="password" value={form.password_confirm} onChange={e => setForm({ ...form, password_confirm: e.target.value })} />
 
-            <div className="flex justify-end gap-2 mt-4">
+            <div className="flex justify-end gap-2 mt-6">
               <Button variant="secondary" type="button" onClick={() => setOpen(false)}>Batal</Button>
               <Button type="submit" disabled={loading}>{loading ? 'Menyimpan...' : 'Simpan'}</Button>
             </div>

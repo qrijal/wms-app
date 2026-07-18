@@ -3,31 +3,22 @@ import Table from '@/components/ui/Table'
 
 interface ProductTableProps {
   products: any[]
-  showBranch?: boolean
+  showWarehouse?: boolean
 }
 
-export default function ProductTable({ products, showBranch }: ProductTableProps) {
-  const columns = showBranch
-    ? ['Nama', 'Product Code', 'Brand', 'UOM', 'Konversi', 'Branch']
-    : ['Nama', 'Product Code', 'Brand', 'UOM', 'Konversi']
+export default function ProductTable({ products, showWarehouse }: ProductTableProps) {
+  const columns = showWarehouse
+    ? ['Nama', 'Product Code', 'Brand', 'UOM', 'Warehouse']
+    : ['Nama', 'Product Code', 'Brand', 'UOM']
 
   const data = products.map((p) => {
-    const uom = p.dim_product_uom
-    const uomName = uom?.name || '-'
-    const primaryName = uom?.base_uom_id?.name || 'Primary'
-    const factor = uom?.conversion_factor
-    const konversi = factor
-      ? `1 ${uomName} = ${factor} ${primaryName}`
-      : '-'
-
     const row = [
       p.name,
       p.product_code,
       p.dim_product_brand?.name || '-',
-      uomName,
-      konversi,
+      p.dim_product_uom?.name || '-',
     ]
-    if (showBranch) row.push(p.dim_branch?.name || '-')
+    if (showWarehouse) row.push(p.dim_warehouses?.name || '-')
     return row
   })
 

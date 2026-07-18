@@ -1,11 +1,9 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import Button from '@/components/ui/Button'
-import Modal from '@/components/ui/Modal'
-import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import Alert from '@/components/ui/Alert'
+import { Save, X, Plus } from 'lucide-react'
 
 interface AddLocationButtonProps {
   role: string
@@ -33,6 +31,16 @@ export default function AddLocationButton({
     label: w.name,
   }))
 
+  // Mengunci scroll layar belakang saat modal terbuka
+  useEffect(() => {
+    if (open) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = 'unset'
+    }
+    return () => { document.body.style.overflow = 'unset' }
+  }, [open])
+
   const handleSubmit = async () => {
     setError('')
     if (!form.name.trim()) {
@@ -40,9 +48,8 @@ export default function AddLocationButton({
       return
     }
 
-    // Jika superadmin, pastikan warehouse_id dipilih
     if (role === 'superadmin' && !form.warehouse_id) {
-      setError('Pilih warehouse')
+      setError('Pilih warehouse terlebih dahulu')
       return
     }
 
@@ -79,45 +86,106 @@ export default function AddLocationButton({
 
   return (
     <>
-      <Button onClick={() => setOpen(true)}>Tambah Lokasi</Button>
+      <button 
+        onClick={() => setOpen(true)} 
+        className="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors"
+      >
+        <Plus size={16} /> Tambah Lokasi
+      </button>
+
       {open && (
-        <Modal onClose={() => setOpen(false)} title="Tambah Lokasi">
-          {error && <Alert type="error" message={error} onClose={() => setError('')} />}
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 transition-opacity"
+          onClick={() => setOpen(false)} // Klik di luar area putih akan menutup modal
+        >
+          {/* Kontainer Putih Modal (stopPropagation agar klik di dalam form tidak menutup modal) */}
+          <div 
+            onClick={(e) => e.stopPropagation()} 
+            className="bg-white rounded-xl shadow-2xl w-full max-w-[420px] overflow-hidden flex flex-col"
+          >
+            <div className="p-6">
+              {/* Header Modal */}
+              <div className="flex justify-between items-start pb-4 border-b border-slate-100">
+                <div className="pr-4">
+                  <h2 className="text-lg font-bold text-slate-800">Tambah Lokasi Baru</h2>
+                  <p className="text-sm text-slate-500 mt-1 leading-relaxed">
+                    Masukkan detail lokasi rak atau area baru di dalam gudang.
+                  </p>
+                </div>
+                <button 
+                  onClick={() => setOpen(false)} 
+                  className="text-slate-400 hover:text-slate-700 transition-colors shrink-0 p-1"
+                >
+                  <X size={20} />
+                </button>
+              </div>
 
-          {role === 'superadmin' && (
-            <Select
-              label="Warehouse"
-              value={form.warehouse_id}
-              onChange={e => setForm({ ...form, warehouse_id: e.target.value })}
-              options={[
-                { value: '', label: '-- Pilih Warehouse --' },
-                ...warehouseOptions,
-              ]}
-            />
-          )}
+              {error && <div className="mt-4"><Alert type="error" message={error} onClose={() => setError('')} /></div>}
 
-          <Input
-            label="Nama Lokasi"
-            value={form.name}
-            onChange={e => setForm({ ...form, name: e.target.value })}
-            placeholder="Nama rak / area"
-          />
-          <Input
-            label="Barcode (opsional)"
-            value={form.barcode}
-            onChange={e => setForm({ ...form, barcode: e.target.value })}
-            placeholder="Kode barcode lokasi"
-          />
+              {/* Body / Form Inputs */}
+              <div className="py-5 space-y-4">
+                {role === 'superadmin' && (
+                  <Select
+                    label="Warehouse"
+                    value={form.warehouse_id}
+                    onChange={e => setForm({ ...form, warehouse_id: e.target.value })}
+                    options={[
+                      { value: '', label: '-- Pilih Warehouse --' },
+                      ...warehouseOptions,
+                    ]}
+                  />
+                )}
 
-          <div className="flex justify-end gap-2 mt-4">
-            <Button variant="secondary" onClick={() => setOpen(false)}>
-              Batal
-            </Button>
-            <Button onClick={handleSubmit} disabled={loading}>
-              {loading ? 'Menyimpan...' : 'Simpan'}
-            </Button>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                    Nama Lokasi
+                  </label>
+                  <input
+                    type="text"
+                    value={form.name}
+                    onChange={e => setForm({ ...form, name: e.target.value })}
+                    placeholder="Contoh: RAK-A01, BLOK-B"
+                    className="w-full px-3 py-2.5 bg-[#F8FAFC] border border-slate-200 rounded-lg text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:bg-white transition-all"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                    Barcode (Opsional)
+                  </label>
+                  <input
+                    type="text"
+                    value={form.barcode}
+                    onChange={e => setForm({ ...form, barcode: e.target.value })}
+                    placeholder="Contoh: LOC-A01-001"
+                    className="w-full px-3 py-2.5 bg-[#F8FAFC] border border-slate-200 rounded-lg text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:bg-white transition-all"
+                  />
+                </div>
+              </div>
+
+              {/* Footer Modal */}
+              <div className="flex justify-end items-center gap-5 pt-4 border-t border-slate-100">
+                <button 
+                  onClick={() => setOpen(false)}
+                  className="text-sm font-semibold text-slate-600 hover:text-slate-800 transition-colors"
+                >
+                  Batal
+                </button>
+                <button 
+                  onClick={handleSubmit} 
+                  disabled={loading} 
+                  className="bg-[#054CB6] hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loading ? 'Menyimpan...' : (
+                    <>
+                      <Save size={16} /> Simpan Lokasi
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
           </div>
-        </Modal>
+        </div>
       )}
     </>
   )

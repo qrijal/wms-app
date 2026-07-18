@@ -37,7 +37,8 @@ export async function POST(
           inbound_detail_id,
           inbound_detail!inner(
             product_id,
-            product_code
+            product_code,
+            pallet_id
           )
         )
       `)

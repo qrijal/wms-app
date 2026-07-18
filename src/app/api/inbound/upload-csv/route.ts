@@ -27,7 +27,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Warehouse tidak ditemukan' }, { status: 400 })
     }
 
-    const adminBranchId = warehouse.branch_id
     const adminWhName = warehouse.name
     const adminBranchName = warehouse.dim_branch?.name || ''
     const adminCompanyName = warehouse.dim_branch?.dim_company?.name || ''
@@ -92,6 +91,7 @@ export async function POST(request: Request) {
         errors.push(`Baris ${i + 1}: data tidak lengkap`)
         continue
       }
+      
       const qty = Number(qtyStr)
       if (isNaN(qty) || qty <= 0) {
         errors.push(`Baris ${i + 1}: qty tidak valid`)
@@ -99,7 +99,7 @@ export async function POST(request: Request) {
       }
 
       // Validasi wajib: wh_name harus sama dengan gudang user
-      if (whName !== adminWhName) {
+      if (whName && whName !== adminWhName) {
         errors.push(`Baris ${i + 1}: wh_name "${whName}" tidak sesuai dengan gudang Anda (${adminWhName})`)
         continue
       }
@@ -114,20 +114,20 @@ export async function POST(request: Request) {
         continue
       }
 
-      // Cari produk berdasarkan product_code & branch_id
+      // Cari produk berdasarkan product_code & warehouse_id (Sesuai update skema terbaru)
       const { data: product } = await supabase
         .from('dim_products')
         .select('id, product_code')
         .eq('product_code', productCode)
-        .eq('branch_id', adminBranchId)
+        .eq('warehouse_id', profile.wh_id)
         .maybeSingle()
 
       if (!product) {
-        errors.push(`Baris ${i + 1}: produk dengan kode ${productCode} tidak ditemukan di branch Anda`)
+        errors.push(`Baris ${i + 1}: produk dengan kode ${productCode} tidak ditemukan di gudang Anda`)
         continue
       }
 
-      // Gabungkan qty jika product_code sama
+      // Gabungkan qty jika product_code sama dalam satu CSV
       const existing = items.find(item => item.product_code === productCode)
       if (existing) {
         existing.qty += qty
@@ -185,6 +185,7 @@ export async function POST(request: Request) {
       item_count: items.length,
       warnings: errors.length > 0 ? errors : undefined,
     }, { status: 201 })
+    
   } catch (error: any) {
     console.error('Upload CSV error:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })

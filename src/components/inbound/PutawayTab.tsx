@@ -1,15 +1,15 @@
-// components/inbound/PutawayTab.tsx
 'use client'
-import { useState, useEffect } from 'react'
-import ScanQRInput from '@/components/ScanQRInput'
+import React, { useState, useEffect, useRef } from 'react'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import Modal from '@/components/ui/Modal'
 import Alert from '@/components/ui/Alert'
+import { CheckCircle2, AlertTriangle, Trash2, ListChecks, MapPin, ScanLine } from 'lucide-react'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface ReceivingDetail {
   id: number
+  pallet_id: string // ID Asli dari database (Hasil scan barcode)
   qty_received: number
   is_damage: boolean
 }
@@ -36,12 +36,20 @@ interface DetailItem {
 
 interface PutawayItem {
   receivingDetailId: number
+  pallet_id: string
   product_code: string
   product_name: string
   location_id: number
   location_name: string
   location_barcode: string
   qty: number
+  is_damage: boolean
+}
+
+interface LocationOption {
+  id: number
+  name: string
+  barcode?: string
 }
 
 interface PutawayTabProps {
@@ -54,20 +62,31 @@ interface PutawayTabProps {
 
 export default function PutawayTab({
   details: initialDetails,
+  warehouseId,
   headerId,
   headerStatus,
   onRefresh,
 }: PutawayTabProps) {
   const [details, setDetails] = useState<DetailItem[]>(initialDetails)
-  const [selectedReceiving, setSelectedReceiving] = useState<{
+  const [locations, setLocations] = useState<LocationOption[]>([])
+  const [putawayCache, setPutawayCache] = useState<PutawayItem[]>([])
+
+  // ── State Scanner ────────────────────────────────────────────────────────
+  const [scanInput, setScanInput] = useState('')
+  const scanInputRef = useRef<HTMLInputElement>(null)
+
+  // State Modal Input Lokasi
+  const [modalData, setModalData] = useState<{
     detail: DetailItem
     receivingId: number
+    pallet_id: string
     remaining: number
     is_damage: boolean
   } | null>(null)
-  const [scannedLocation, setScannedLocation] = useState<any>(null)
-  const [qty, setQty] = useState<number>(0)
-  const [putawayCache, setPutawayCache] = useState<PutawayItem[]>([])
+  const [selectedLocId, setSelectedLocId] = useState<string>('')
+  const [qty, setQty] = useState<number>(1)
+
+  // State Notifikasi & Review
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [showReview, setShowReview] = useState(false)
@@ -75,129 +94,143 @@ export default function PutawayTab({
 
   useEffect(() => { setDetails(initialDetails) }, [initialDetails])
 
+  // Fetch Locations untuk Dropdown Rak
+  useEffect(() => {
+    if (warehouseId) {
+      fetch(`/api/locations?warehouse_id=${warehouseId}`)
+        .then(res => res.ok ? res.json() : [])
+        .then(data => setLocations(data))
+        .catch(() => setLocations([]))
+    }
+  }, [warehouseId])
+
   // ── Helpers ──────────────────────────────────────────────────────────────
   const getRemainingForReceiving = (detail: DetailItem, receivingId: number) => {
     const receiving = detail.receiving_details?.find(r => r.id === receivingId)
     if (!receiving) return 0
-    // Total putaway dari server (putaway_details) + cache
+    // Total putaway dari server
     const serverPutaway = (detail.putaway_details || [])
       .filter(p => p.receiving_detail_id === receivingId)
       .reduce((sum, p) => sum + (p.qty || 0), 0)
+    // Total dari antrean lokal
     const cachePutaway = putawayCache
       .filter(p => p.receivingDetailId === receivingId)
       .reduce((sum, p) => sum + p.qty, 0)
+
     return receiving.qty_received - serverPutaway - cachePutaway
   }
 
-  // ── Pilih receiving detail ───────────────────────────────────────────────
-  const handleSelectReceiving = (detail: DetailItem, receivingId: number) => {
-    const remaining = getRemainingForReceiving(detail, receivingId)
-    if (remaining <= 0) return
-    const receiving = detail.receiving_details?.find(r => r.id === receivingId)
-    setSelectedReceiving({
+  // Flatten data agar mempermudah render & pencarian Scanner
+  const rows = details.flatMap(detail =>
+    (detail.receiving_details || []).map(recv => ({
       detail,
-      receivingId,
+      recv,
+      remaining: getRemainingForReceiving(detail, recv.id)
+    }))
+  )
+
+  const allPutawayDone = rows.length > 0 && rows.every(r => r.remaining === 0) && putawayCache.length === 0
+
+  // ── Actions: Barcode Scanner ─────────────────────────────────────────────
+  const handleScanSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+    setSuccess('')
+    const scannedVal = scanInput.trim().toUpperCase()
+    if (!scannedVal) return
+
+    // 1. Cari pallet di dokumen ini (Cocokkan dengan Pallet ID asli dari Backend)
+    const foundRow = rows.find(r => r.recv.pallet_id?.toUpperCase() === scannedVal)
+
+    if (!foundRow) {
+      setError(`❌ Pallet ID [${scannedVal}] tidak ditemukan di dokumen ini! Pastikan Anda men-scan Pallet yang benar.`)
+    } else if (foundRow.remaining <= 0) {
+      setError(`⚠️ Pallet ID [${scannedVal}] sudah dialokasikan sepenuhnya!`)
+    } else {
+      // 2. Jika ketemu, langsung buka modal untuk alokasi lokasi
+      handleOpenModal(foundRow.detail, foundRow.recv, foundRow.remaining)
+    }
+
+    setScanInput('') // Kosongkan input setelah di-scan agar siap untuk scan berikutnya
+  }
+
+  // ── Actions: Modal & Queue ───────────────────────────────────────────────
+  const handleOpenModal = (detail: DetailItem, recv: ReceivingDetail, remaining: number) => {
+    setError('')
+    setSuccess('')
+    setModalData({
+      detail,
+      receivingId: recv.id,
+      pallet_id: recv.pallet_id,
       remaining,
-      is_damage: receiving?.is_damage || false,
+      is_damage: recv.is_damage,
     })
-    setScannedLocation(null)
-    setQty(0)
-    setError('')
+    setSelectedLocId('')
+    setQty(remaining > 0 ? remaining : 1) // Default isi penuh sisa qty pallet
   }
 
-  // ── Scan lokasi ──────────────────────────────────────────────────────────
-  const handleLocationScan = async (barcode: string) => {
-    if (!selectedReceiving) return
-    setError('')
-    try {
-      const res = await fetch(`/api/locations/by-barcode?barcode=${encodeURIComponent(barcode)}`)
-      if (!res.ok) throw new Error('Lokasi tidak valid')
-      const loc = await res.json()
-      setScannedLocation(loc)
-    } catch (err: any) {
-      setError(err.message)
-    }
-  }
-
-  // ── Tambahkan ke cache ───────────────────────────────────────────────────
   const handleAddToCache = () => {
-    if (!selectedReceiving || !scannedLocation || qty <= 0) {
-      setError('Lokasi dan qty harus valid')
-      return
-    }
-    if (qty > selectedReceiving.remaining) {
-      setError(`Maksimal ${selectedReceiving.remaining}`)
-      return
-    }
+    if (!modalData) return
+    if (!selectedLocId) { setError('Silakan pilih lokasi terlebih dahulu'); return }
+    if (qty <= 0) { setError('Qty harus lebih besar dari 0'); return }
+    if (qty > modalData.remaining) { setError(`Maksimal alokasi adalah ${modalData.remaining}`); return }
 
-    // Tambahkan ke cache
+    const loc = locations.find(l => l.id.toString() === selectedLocId)
+    if (!loc) { setError('Lokasi tidak valid'); return }
+
     setPutawayCache(prev => [
       ...prev,
       {
-        receivingDetailId: selectedReceiving.receivingId,
-        product_code: selectedReceiving.detail.product_code,
-        product_name: selectedReceiving.detail.dim_products?.name || selectedReceiving.detail.product_code,
-        location_id: scannedLocation.id,
-        location_name: scannedLocation.name,
-        location_barcode: scannedLocation.barcode || '',
+        receivingDetailId: modalData.receivingId,
+        pallet_id: modalData.pallet_id,
+        product_code: modalData.detail.product_code,
+        product_name: modalData.detail.dim_products?.name || modalData.detail.product_code,
+        location_id: loc.id,
+        location_name: loc.name,
+        location_barcode: loc.barcode || '',
         qty,
+        is_damage: modalData.is_damage
       },
     ])
 
-    // ✅ Update remaining secara lokal agar UI langsung berubah
-    setSelectedReceiving(prev => {
-      if (!prev) return null
-      return { ...prev, remaining: prev.remaining - qty }
-    })
+    setSuccess(`✅ Pallet [${modalData.pallet_id}] berhasil masuk antrean lokasi ${loc.name}.`)
+    setModalData(null)
 
-    setSuccess(`Ditambahkan ke cache: ${qty} unit → ${scannedLocation.name}`)
-    setScannedLocation(null)
-    setQty(0)
+    // Auto-focus kembali ke scanner setelah modal ditutup
+    setTimeout(() => scanInputRef.current?.focus(), 100)
   }
 
-  // ── Hapus / edit cache ───────────────────────────────────────────────────
-  const removePutawayItem = (index: number) =>
-    setPutawayCache(prev => prev.filter((_, i) => i !== index))
-
-  const updatePutawayItemQty = (index: number, newQty: number) => {
-    if (newQty <= 0) { removePutawayItem(index); return }
-    const item = putawayCache[index]
-    if (!item) return
-    // Validasi qty terhadap sisa sebenarnya
-    const detail = details.find(d => d.receiving_details?.some(r => r.id === item.receivingDetailId))
-    if (detail) {
-      const remaining = getRemainingForReceiving(detail, item.receivingDetailId) + item.qty
-      if (newQty > remaining) return
-    }
-    setPutawayCache(prev =>
-      prev.map((p, i) => (i === index ? { ...p, qty: newQty } : p))
-    )
-  }
-
-  // ── Konfirmasi akhir ────────────────────────────────────────────────────
+  // ── Actions: BULK API (Putaway) ────────────────────────────────────────────
   const handleFinalConfirm = async () => {
     setConfirming(true)
     setError('')
     try {
-      for (const item of putawayCache) {
-        const res = await fetch('/api/inbound/putaway', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            receiving_detail_id: item.receivingDetailId,
-            location_id: item.location_id,
-            qty: item.qty,
-          }),
-        })
-        if (!res.ok) {
-          let msg = 'Gagal menyimpan putaway'
-          try { const d = await res.json(); msg = d.error || msg } catch {}
-          throw new Error(msg)
-        }
+      // Siapkan Payload Array untuk API Bulk Insert Putaway
+      const payload = putawayCache.map(item => ({
+        receiving_detail_id: item.receivingDetailId,
+        location_id: item.location_id,
+        qty: item.qty
+      }))
+
+      // Tembak API Putaway dengan Bulk Payload
+      const res = await fetch('/api/inbound/putaway-details', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: payload,
+          headerId: headerId // Mengubah status header ke PUTAWAY
+        }),
+      })
+
+      if (!res.ok) {
+        let msg = 'Gagal menyimpan putaway'
+        try { const d = await res.json(); msg = d.error || msg } catch { }
+        throw new Error(msg)
       }
+
       setPutawayCache([])
       setShowReview(false)
-      setSuccess('Semua item berhasil diputaway!')
+      setSuccess('Semua penempatan lokasi berhasil disimpan ke sistem!')
       await onRefresh()
     } catch (err: any) {
       setError(err.message)
@@ -206,20 +239,12 @@ export default function PutawayTab({
     }
   }
 
-  // ── Guard render ─────────────────────────────────────────────────────────
-  if (headerStatus === 'GRN') {
-    return <div className="p-6 bg-green-50 border border-green-200 rounded-xl text-green-700 font-semibold text-center">✅ Putaway telah selesai. Inbound sudah GRN.</div>
+  // ── Renders ──────────────────────────────────────────────────────────────
+  if (headerStatus === 'GRN' || headerStatus === 'COMPLETED') {
+    return <div className="p-6 bg-green-50 border border-green-200 rounded-xl text-green-700 font-semibold text-center flex items-center justify-center gap-2"><CheckCircle2 size={20} /> Putaway telah selesai dan dokumen sudah berstatus GRN.</div>
   }
   if (headerStatus !== 'RECEIVING' && headerStatus !== 'PUTAWAY') {
-    return <div className="p-6 bg-yellow-50 border border-yellow-200 rounded-xl text-yellow-700 font-semibold text-center">⚠️ Proses Receiving belum selesai.</div>
-  }
-
-  // Cek apakah semua receiving detail sudah diputaway (termasuk cache)
-  const allPutawayDone = details.every(detail =>
-    (detail.receiving_details || []).every(recv => getRemainingForReceiving(detail, recv.id) === 0)
-  )
-  if (allPutawayDone && putawayCache.length === 0) {
-    return <div className="p-6 bg-green-50 border border-green-200 rounded-xl text-green-700 font-semibold text-center">✅ Semua item sudah diputaway. Lanjut ke GRN.</div>
+    return <div className="p-6 bg-yellow-50 border border-yellow-200 rounded-xl text-yellow-700 font-semibold text-center flex items-center justify-center gap-2"><AlertTriangle size={20} /> Proses Receiving belum selesai. Tidak dapat memproses Putaway.</div>
   }
 
   return (
@@ -227,138 +252,223 @@ export default function PutawayTab({
       {error && <Alert type="error" message={error} onClose={() => setError('')} />}
       {success && <Alert type="success" message={success} onClose={() => setSuccess('')} />}
 
-      {!selectedReceiving ? (
-        // ── Daftar receiving detail ──
-        <div>
-          <h3 className="font-semibold text-lg mb-3">Pilih Item untuk Putaway</h3>
-          <div className="space-y-2">
-            {details.map(detail =>
-              (detail.receiving_details || []).map(recv => {
-                const remaining = getRemainingForReceiving(detail, recv.id)
-                if (remaining <= 0) return null
-                return (
-                  <div
-                    key={`${detail.id}-${recv.id}`}
-                    onClick={() => handleSelectReceiving(detail, recv.id)}
-                    className="cursor-pointer bg-white p-4 rounded-xl shadow border border-gray-200 hover:border-blue-400 transition-colors flex justify-between items-center"
-                  >
-                    <div>
-                      <span className="font-medium">{detail.dim_products?.name}</span>
-                      <span className="text-xs text-gray-400 ml-2">{detail.product_code}</span>
-                      <span className="text-xs ml-2">{recv.is_damage ? '⚠ Damage' : 'Normal'}: {recv.qty_received} unit</span>
-                    </div>
-                    <div className="text-sm font-semibold text-blue-600">{remaining} sisa</div>
-                  </div>
-                )
-              })
-            )}
+      {allPutawayDone && (
+        <div className="p-4 bg-green-50 border border-green-200 rounded-xl text-green-700 font-semibold text-center flex items-center justify-center gap-2">
+          <CheckCircle2 size={20} /> Semua item yang diterima telah dialokasikan ke lokasi masing-masing. Lanjut ke proses GRN.
+        </div>
+      )}
+
+      {/* ── AREA SCANNER BARCODE (Disembunyikan jika Putaway Selesai) ── */}
+      {!allPutawayDone && (
+        <div className="bg-blue-50 border border-blue-200 p-5 rounded-xl shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div>
+            <h3 className="text-blue-800 font-bold text-lg flex items-center gap-2"><ScanLine size={20} /> Mode Scan Barcode</h3>
+            <p className="text-sm text-blue-600">Arahkan kursor ke kotak di samping lalu tembak QR Code Pallet.</p>
           </div>
-        </div>
-      ) : (
-        // ── Mode putaway ──
-        <div className="bg-white p-6 rounded-xl shadow border space-y-3">
-          <h3 className="font-bold text-lg">Putaway: {selectedReceiving.detail.dim_products?.name}</h3>
-          <p>Kode: {selectedReceiving.detail.product_code}</p>
-          <p>Status: {selectedReceiving.is_damage ? '⚠ Damage' : 'Normal'}</p>
-          <p>Sisa: {selectedReceiving.remaining} unit</p>
-
-          {!scannedLocation ? (
-            <ScanQRInput onScan={handleLocationScan} placeholder="Scan barcode lokasi tujuan..." />
-          ) : (
-            <div className="space-y-3">
-              <p>Lokasi: <strong>{scannedLocation.name}</strong> ({scannedLocation.barcode})</p>
-              <Input
-                label="Qty"
-                type="number"
-                value={qty}
-                onChange={e => setQty(Number(e.target.value))}
-                min={1}
-                max={selectedReceiving.remaining}
-              />
-              <div className="flex gap-3">
-                <Button onClick={handleAddToCache}>Tambahkan ke Cache</Button>
-                <Button variant="secondary" onClick={() => { setScannedLocation(null); setQty(0) }}>Ganti Lokasi</Button>
-              </div>
-            </div>
-          )}
-          <Button variant="secondary" onClick={() => { setSelectedReceiving(null); setScannedLocation(null); setQty(0); setError('') }}>
-            Kembali ke Daftar
-          </Button>
+          <form onSubmit={handleScanSubmit} className="w-full sm:w-1/2 flex items-center gap-2 relative">
+            <input
+              ref={scanInputRef}
+              type="text"
+              placeholder="Scan Pallet ID di sini..."
+              value={scanInput}
+              onChange={(e) => setScanInput(e.target.value)}
+              className="w-full pl-4 pr-10 py-3 border-2 border-blue-300 rounded-xl focus:border-blue-600 focus:ring-4 focus:ring-blue-100 outline-none text-slate-700 font-mono font-bold tracking-wider text-lg uppercase transition-all"
+              autoFocus
+            />
+            <Button type="submit" className="shrink-0 bg-blue-700 hover:bg-blue-800 absolute right-1 top-1 bottom-1 px-4 text-sm rounded-lg">Cari</Button>
+          </form>
         </div>
       )}
 
-      {/* ── Tombol Review ── */}
-      {putawayCache.length > 0 && (
-        <div className="flex justify-end">
-          <Button onClick={() => setShowReview(true)}>Review & Konfirmasi ({putawayCache.length})</Button>
-        </div>
-      )}
-
-      {/* ── List Detail Putaway per receiving detail ── */}
-      <div>
-        <h3 className="font-semibold text-lg mb-3">Detail Putaway</h3>
-        <div className="space-y-2">
-          {details.map(detail =>
-            (detail.receiving_details || []).map(recv => {
-              const serverPutaway = (detail.putaway_details || []).filter(p => p.receiving_detail_id === recv.id)
-              const cacheItems = putawayCache.filter(p => p.receivingDetailId === recv.id)
-              const allPutaway = [
-                ...serverPutaway.map(p => ({ location_name: p.dim_location?.name || `Lokasi ${p.location_id}`, qty: p.qty })),
-                ...cacheItems.map(p => ({ location_name: `${p.location_name} (cache)`, qty: p.qty })),
-              ]
-              if (allPutaway.length === 0) return null
-              return (
-                <div key={`${detail.id}-${recv.id}`} className="bg-white p-4 rounded-xl shadow border">
-                  <div className="flex flex-wrap gap-4 text-sm">
-                    <span className="font-mono text-xs">{detail.product_code}</span>
-                    <span className="font-medium">{detail.dim_products?.name}</span>
-                    <span className="text-gray-500">{recv.is_damage ? '⚠ Damage' : 'Normal'}</span>
-                  </div>
-                  <div className="mt-2 space-y-1">
-                    {allPutaway.map((p, i) => (
-                      <div key={i} className="flex justify-between text-sm ml-4">
-                        <span>{p.location_name}</span>
-                        <span className="font-semibold">{p.qty}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )
-            })
+      {/* Tabel Utama Daftar Putaway */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+          <div>
+            <h3 className="font-semibold text-slate-800 text-lg">Daftar Pallet Belum Masuk Rak</h3>
+            <p className="text-xs text-slate-500 mt-1">Gunakan scanner atau klik tombol "Atur Lokasi" secara manual.</p>
+          </div>
+          {putawayCache.length > 0 && (
+            <Button onClick={() => setShowReview(true)} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-900 shadow-sm">
+              <ListChecks size={18} /> Review Antrean Rak ({putawayCache.length})
+            </Button>
           )}
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-semibold">
+              <tr>
+                <th className="px-6 py-4">Pallet ID</th>
+                <th className="px-6 py-4">SKU / Produk</th>
+                <th className="px-6 py-4 text-center">Status Kondisi</th>
+                <th className="px-6 py-4 text-center">Total Item</th>
+                <th className="px-6 py-4 text-center">Sisa Belum Dialokasi</th>
+                <th className="px-6 py-4 text-right">Aksi</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-sm">
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-8 text-center text-slate-500 italic">Belum ada barang yang diterima. Selesaikan proses Receiving terlebih dahulu.</td>
+                </tr>
+              ) : (
+                rows.map((row, idx) => {
+                  const isFull = row.remaining === 0
+                  const uomName = row.detail.dim_products?.uom?.name || 'unit'
+
+                  return (
+                    <tr key={idx} className={`hover:bg-slate-50 transition-colors ${isFull ? 'bg-slate-50/50 opacity-60' : ''}`}>
+                      <td className="px-6 py-4">
+                        <span className="font-mono font-bold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-md border border-slate-200">
+                          {row.recv.pallet_id || '-'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <p className="font-medium text-slate-800 truncate max-w-[200px]" title={row.detail.dim_products?.name || '-'}>{row.detail.dim_products?.name || '-'}</p>
+                        <p className="font-mono text-xs text-slate-500 mt-0.5">{row.detail.product_code}</p>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        {row.recv.is_damage ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-red-50 text-red-600 border border-red-100"><AlertTriangle size={12} /> RUSAK</span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-emerald-50 text-emerald-600 border border-emerald-100"><CheckCircle2 size={12} /> BAGUS</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 text-center font-medium text-slate-700">
+                        {row.recv.qty_received} <span className="text-xs text-slate-400">{uomName}</span>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        {isFull ? (
+                          <span className="text-green-600 text-xs font-bold flex items-center justify-center gap-1"><CheckCircle2 size={14} /> RAK TEPAT</span>
+                        ) : (
+                          <span className="font-bold text-blue-600 text-lg">{row.remaining} <span className="text-xs text-blue-400 font-normal">{uomName}</span></span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <button
+                          onClick={() => handleOpenModal(row.detail, row.recv, row.remaining)}
+                          disabled={isFull}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 text-slate-700 text-xs font-semibold rounded-lg hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          <MapPin size={14} /> Atur Lokasi
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
-      {/* ── Modal Review ── */}
-      {showReview && (
-        <Modal onClose={() => setShowReview(false)} title="Konfirmasi Putaway">
-          <div className="max-h-96 overflow-y-auto space-y-2">
-            {putawayCache.map((item, idx) => (
-              <div key={idx} className="p-3 border rounded-lg">
-                <div className="flex justify-between">
-                  <div>
-                    <p className="font-medium">{item.product_name}</p>
-                    <p className="text-xs text-gray-500">{item.product_code}</p>
-                    <p className="text-xs text-blue-600">{item.location_name} ({item.location_barcode})</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      className="w-16 border rounded px-2 py-1 text-sm"
-                      value={item.qty}
-                      onChange={e => updatePutawayItemQty(idx, Number(e.target.value))}
-                      min={1}
-                    />
-                    <button onClick={() => removePutawayItem(idx)} className="text-red-500 text-xs">Hapus</button>
-                  </div>
+      {/* Modal Input untuk Penempatan Lokasi */}
+      {modalData && (
+        <Modal onClose={() => setModalData(null)} title="Scan / Pilih Lokasi Rak">
+          <div className="space-y-5">
+            {/* Header Informasi */}
+            <div className={`p-4 rounded-xl border ${modalData.is_damage ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-200'}`}>
+              <div className="flex items-center justify-between mb-3 border-b pb-3 border-black/10">
+                <span className="font-bold text-lg font-mono text-slate-800">{modalData.pallet_id}</span>
+                {modalData.is_damage && <span className="px-2 py-0.5 bg-red-600 text-white text-xs font-bold rounded flex items-center gap-1"><AlertTriangle size={12} /> HARUS KE AREA RETUR</span>}
+              </div>
+              <div className="flex justify-between items-center text-sm">
+                <div>
+                  <span className="text-slate-500 block text-xs">Produk</span>
+                  <span className="font-semibold text-slate-800">{modalData.detail.dim_products?.name}</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-slate-500 block text-xs">Total Akan Disimpan</span>
+                  <span className={`font-black text-xl ${modalData.is_damage ? 'text-red-700' : 'text-blue-700'}`}>{modalData.remaining} <span className="text-sm font-semibold">{modalData.detail.dim_products?.uom?.name}</span></span>
                 </div>
               </div>
-            ))}
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-800 mb-1.5 flex items-center gap-2">Pilih / Scan Lokasi Rak <MapPin size={16} className="text-slate-400" /></label>
+              <select
+                value={selectedLocId}
+                onChange={(e) => setSelectedLocId(e.target.value)}
+                className="w-full px-4 py-3 bg-white border-2 border-slate-300 rounded-xl font-bold text-slate-700 focus:border-blue-600 focus:ring-4 focus:ring-blue-100 outline-none transition-all"
+              >
+                <option value="" disabled>-- Pilih Rak / Bin / Area Tujuan --</option>
+                {locations.map(loc => (
+                  <option key={loc.id} value={loc.id}>{loc.name} {loc.barcode ? `[BARCODE: ${loc.barcode}]` : ''}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Qty dikunci agar 1 pallet = 1 pemindahan utuh */}
+            <div className="hidden">
+              <Input label="Kuantitas (Qty)" type="number" value={qty} onChange={e => setQty(Number(e.target.value))} min={1} max={modalData.remaining} />
+            </div>
+
+            <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
+              <Button variant="secondary" onClick={() => setModalData(null)}>Batal</Button>
+              <Button onClick={handleAddToCache} disabled={!selectedLocId} className="bg-slate-800 hover:bg-slate-900 text-white flex items-center gap-2 px-6 py-2.5">
+                <CheckCircle2 size={18} /> Konfirmasi Lokasi
+              </Button>
+            </div>
           </div>
-          <div className="flex justify-end gap-3 mt-4">
+        </Modal>
+      )}
+
+      {/* Modal Review Akhir (VIEW-ONLY Table) */}
+      {showReview && (
+        <Modal onClose={() => setShowReview(false)} title="Review Antrean Putaway" className="w-[90vw] max-w-5xl">
+          <div className="max-h-[60vh] overflow-y-auto border border-slate-200 rounded-xl">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="p-4 text-xs font-semibold text-slate-600 uppercase w-32">Pallet ID</th>
+                  <th className="p-4 text-xs font-semibold text-slate-600 uppercase">Produk</th>
+                  <th className="p-4 text-xs font-semibold text-slate-600 uppercase text-center w-32">Rak Tujuan</th>
+                  <th className="p-4 text-xs font-semibold text-slate-600 uppercase text-center w-28">Total Qty</th>
+                  <th className="p-4 text-xs font-semibold text-slate-600 uppercase text-center w-16">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {putawayCache.length === 0 ? (
+                  <tr><td colSpan={5} className="p-4 text-center text-slate-500">Antrean kosong</td></tr>
+                ) : (
+                  putawayCache.map((item, idx) => (
+                    <tr key={idx} className={`hover:bg-slate-50 ${item.is_damage ? 'bg-red-50/30' : ''}`}>
+                      <td className="p-4 font-mono font-bold text-slate-700">
+                        {item.pallet_id}
+                        {item.is_damage && <span className="block mt-1 text-[10px] text-red-600 font-bold tracking-wider">⚠ RUSAK</span>}
+                      </td>
+                      <td className="p-4">
+                        <p className="font-semibold text-slate-800">{item.product_name}</p>
+                        <p className="text-xs text-slate-500 font-mono mt-0.5">{item.product_code}</p>
+                      </td>
+                      <td className="p-4 text-center">
+                        <span className="px-3 py-1 bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded-lg text-sm">
+                          {item.location_name}
+                        </span>
+                      </td>
+                      <td className="p-4 text-center font-black text-slate-700 text-lg">
+                        {item.qty}
+                      </td>
+                      <td className="p-4 text-center">
+                        <button onClick={() => setPutawayCache(prev => prev.filter((_, i) => i !== idx))} className="p-2 text-slate-400 hover:bg-red-100 hover:text-red-600 rounded-lg transition-colors">
+                          <Trash2 size={18} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-100">
             <Button variant="secondary" onClick={() => setShowReview(false)}>Tutup</Button>
-            <Button onClick={handleFinalConfirm} disabled={confirming || putawayCache.length === 0}>
-              {confirming ? 'Menyimpan...' : 'Konfirmasi Semua'}
+            <Button
+              onClick={handleFinalConfirm}
+              disabled={confirming || putawayCache.length === 0}
+              className="bg-slate-800 hover:bg-slate-900 text-white px-6 py-2.5"
+            >
+              {confirming ? 'Menyimpan ke Database...' : 'Konfirmasi & Simpan API'}
             </Button>
           </div>
         </Modal>

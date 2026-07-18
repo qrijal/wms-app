@@ -7,124 +7,51 @@ export default async function MasterProductPage() {
   const profile = await getUserProfile()
   const supabase = await createClient()
 
-  // Ambil produk sesuai role
   let products: any[] = []
+  let brands: any[] = []
+  let uoms: any[] = []
+  let warehouses: any[] = []
+
   if (profile.role === 'superadmin') {
-    const { data } = await supabase
+    const { data: prodData } = await supabase
       .from('dim_products')
-      .select('*, dim_product_brand(name), dim_product_uom!inner(name, conversion_factor, base_uom_id (name)), dim_branch(name)')
+      .select('*, dim_product_brand(name), dim_product_uom(name), dim_warehouses(name)')
       .order('name')
-    products = data || []
+    products = prodData || []
+
+    const { data: brandData } = await supabase.from('dim_product_brand').select('*').order('name')
+    brands = brandData || []
+
+    const { data: uomData } = await supabase.from('dim_product_uom').select('id, name').order('name')
+    uoms = uomData || []
+
+    const { data: whData } = await supabase.from('dim_warehouses').select('id, name').order('name')
+    warehouses = whData || []
   } else {
     const whId = profile.wh_id
-    if (!whId) return <div>Warehouse tidak ditemukan</div>
+    if (!whId) return <div>Warehouse tidak valid</div>
 
-    const { data: warehouse, error: whError } = await supabase
-      .from('dim_warehouses')
-      .select('branch_id')
-      .eq('id', whId)
-      .maybeSingle()
-
-    if (whError) {
-      console.error('Error mengambil warehouse:', whError)
-      return <div>Gagal membaca data warehouse: {whError.message}</div>
-    }
-    if (!warehouse) return <div>Warehouse tidak valid</div>
-
-    const { data, error: productsError } = await supabase
+    // Ambil produk berdasarkan warehouse_id
+    const { data: prodData } = await supabase
       .from('dim_products')
-      .select('*, dim_product_brand(name), dim_product_uom!inner(name, conversion_factor, base_uom_id (name))')
-      .eq('branch_id', warehouse.branch_id)
+      .select('*, dim_product_brand(name), dim_product_uom(name)')
+      .eq('warehouse_id', whId)
       .order('name')
+    products = prodData || []
 
-    if (productsError) {
-      console.error('Error mengambil produk:', productsError)
-      return <div>Gagal memuat data produk: {productsError.message}</div>
-    }
-    products = data || []
-  }
+    const { data: brandData } = await supabase
+      .from('dim_product_brand')
+      .select('*')
+      .or(`warehouse_id.eq.${whId},warehouse_id.is.null`)
+      .order('name')
+    brands = brandData || []
 
-  // Ambil brands (semua untuk dropdown)
-  const { data: brands, error: brandsError } = await supabase.from('dim_product_brand').select('*').order('name')
-  if (brandsError) console.error('Error mengambil brands:', brandsError)
-
-  // Ambil hanya UOM SECONDARY
-  let uomSecondary: any[] = []
-  if (profile.role === 'superadmin') {
-    const { data, error: uomError } = await supabase
+    const { data: uomData } = await supabase
       .from('dim_product_uom')
-      .select('*, base:base_uom_id(name)')
-      .eq('is_primary', false)
-      .not('base_uom_id', 'is', null)
+      .select('id, name')
+      .or(`warehouse_id.eq.${whId},warehouse_id.is.null`)
       .order('name')
-    if (uomError) console.error('Error mengambil UOM:', uomError)
-    uomSecondary = data || []
-  } else {
-    // Admin
-    const whId = profile.wh_id
-    if (!whId) return <div>Warehouse tidak ditemukan</div>
-
-    const { data: wh, error: whErr } = await supabase
-      .from('dim_warehouses')
-      .select('branch_id, dim_branch(company_id)')
-      .eq('id', whId)
-      .maybeSingle()
-
-    if (whErr) {
-      console.error('Error mengambil warehouse (company):', whErr)
-      return <div>Gagal membaca data warehouse: {whErr.message}</div>
-    }
-    if (!wh) return <div>Warehouse tidak ditemukan</div>
-
-    const companyId = wh?.dim_branch?.company_id
-
-    // Query pertama: UOM dengan company_id = companyId (jika ada)
-    let query1 = supabase
-      .from('dim_product_uom')
-      .select('*, base:base_uom_id(name)')
-      .eq('is_primary', false)
-      .not('base_uom_id', 'is', null)
-      .order('name')
-
-    // Query kedua: UOM global (company_id IS NULL) – kecuali companyId sendiri null
-    let query2 = companyId
-      ? supabase
-          .from('dim_product_uom')
-          .select('*, base:base_uom_id(name)')
-          .eq('is_primary', false)
-          .not('base_uom_id', 'is', null)
-          .is('company_id', null)
-          .order('name')
-      : null
-
-    if (companyId) {
-      query1 = query1.eq('company_id', companyId)
-    } else {
-      query1 = query1.is('company_id', null)
-    }
-
-    const [{ data: data1, error: err1 }, { data: data2, error: err2 }] = await Promise.all([
-      query1,
-      query2 ? query2 : Promise.resolve({ data: [], error: null }),
-    ])
-
-    if (err1 || err2) {
-      console.error('Error ambil UOM:', err1 || err2)
-      return <div>Gagal memuat UOM</div>
-    }
-
-    const merged = [...(data1 || []), ...(data2 || [])]
-    // Hapus duplikat berdasarkan id (jika ada yang overlap)
-    uomSecondary = merged.filter((item, index, self) =>
-      index === self.findIndex(t => t.id === item.id)
-    )
-  }
-
-  // Data branch untuk superadmin
-  let branches: any[] = []
-  if (profile.role === 'superadmin') {
-    const { data } = await supabase.from('dim_branch').select('id, name').order('name')
-    branches = data || []
+    uoms = uomData || []
   }
 
   return (
@@ -133,13 +60,12 @@ export default async function MasterProductPage() {
         <h1 className="text-2xl font-bold">Master Product</h1>
         <AddProductButton
           role={profile.role}
-          warehouseId={profile.wh_id}
-          brands={brands || []}
-          uoms={uomSecondary}
-          branches={branches}
+          brands={brands}
+          uoms={uoms}
+          warehouses={warehouses}
         />
       </div>
-      <ProductTable products={products} showBranch={profile.role === 'superadmin'} />
+      <ProductTable products={products} showWarehouse={profile.role === 'superadmin'} />
     </div>
   )
 }

@@ -1,3 +1,4 @@
+// src/app/api/users/route.ts
 import { NextResponse } from 'next/server'
 import { requireSuperadmin } from '@/lib/permissions'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -24,7 +25,9 @@ export async function POST(request: Request) {
   try {
     await requireSuperadmin()
     const supabase = await createServiceClient()
-    const { email, password, full_name, wh_id } = await request.json()
+    
+    // PERBAIKAN: Tambahkan 'role' di dalam destructuring ini
+    const { email, password, full_name, wh_id, role } = await request.json()
 
     // Validasi
     if (!email || !password || !full_name || !wh_id) {
@@ -40,6 +43,7 @@ export async function POST(request: Request) {
       .select('id')
       .eq('email', email)
       .maybeSingle()
+      
     if (existing) {
       return NextResponse.json({ error: 'Email sudah terdaftar' }, { status: 400 })
     }
@@ -50,6 +54,7 @@ export async function POST(request: Request) {
       password,
       email_confirm: true,
     })
+    
     if (authError) {
       return NextResponse.json({ error: authError.message }, { status: 400 })
     }
@@ -62,7 +67,7 @@ export async function POST(request: Request) {
           id: authUser.user.id,
           email,
           full_name,
-          role: role || 'admin',   // gunakan role yang dikirim
+          role: role || 'admin',   // Sekarang 'role' sudah tersedia
           wh_id,
         },
         { onConflict: 'id' }

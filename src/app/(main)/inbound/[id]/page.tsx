@@ -1,3 +1,4 @@
+//src/app/(main)/inbound/[id]/page.tsx
 import { getUserProfile } from '@/lib/permissions'
 import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
@@ -58,11 +59,20 @@ export default async function InboundDetailPage({ params }: { params: Promise<{ 
     })
   }
 
+  // REVISI DI SINI: Hapus tag <h1> dan <p> karena desain header 
+  // sudah di-handle sepenuhnya oleh komponen <InboundProcess />
   return (
-    <div>
-      <h1 className="text-2xl font-bold mb-2">Inbound #{header.ref_no || header.id}</h1>
-      <p className="text-gray-500 mb-4">Tanggal: {header.inbound_date} | Status: {header.status}</p>
-      <InboundProcess header={header} details={details} warehouseId={profile.wh_id!} />
+    <div className="w-full">
+      <InboundProcess 
+        header={{
+          ...header,
+          // Mapping key agar sesuai dengan desain InboundProcess.tsx sebelumnya
+          doc_number: header.ref_no, 
+          arrival_date: header.inbound_date 
+        }} 
+        details={details} 
+        warehouseId={profile.wh_id!} 
+      />
     </div>
   )
 }

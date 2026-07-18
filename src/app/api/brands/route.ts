@@ -7,29 +7,23 @@ export async function GET(request: Request) {
     const profile = await getUserProfile()
     const supabase = await createClient()
     const { searchParams } = new URL(request.url)
-    const companyId = searchParams.get('company_id')
+    const filterWarehouseId = searchParams.get('warehouse_id')
     
-    let query = supabase.from('dim_product_brand').select('*, dim_company(name)').order('name')
+    let query = supabase
+      .from('dim_product_brand')
+      .select('*, dim_warehouses(name)')
+      .order('name')
     
-    // Admin hanya melihat brand yang company_id-nya sama dengan company warehouse atau NULL (global)
+    // Admin hanya melihat brand dari warehouse-nya atau brand global (NULL)
     if (profile.role === 'admin') {
-      // Dapatkan company_id dari warehouse admin
-      const { data: wh } = await supabase
-        .from('dim_warehouses')
-        .select('branch_id, dim_branch(company_id)')
-        .eq('id', profile.wh_id)
-        .single()
-      if (wh?.dim_branch?.company_id) {
-        query = query.or(`company_id.eq.${wh.dim_branch.company_id},company_id.is.null`)
-      } else {
-        query = query.is('company_id', null)
-      }
+      query = query.or(`warehouse_id.eq.${profile.wh_id},warehouse_id.is.null`)
     } else if (profile.role === 'superadmin') {
-      if (companyId) query = query.eq('company_id', companyId)
+      if (filterWarehouseId) query = query.eq('warehouse_id', filterWarehouseId)
     }
 
     const { data, error } = await query
     if (error) throw error
+    
     return NextResponse.json(data)
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 403 })
@@ -40,27 +34,38 @@ export async function POST(request: Request) {
   try {
     const profile = await getUserProfile()
     const supabase = await createClient()
-    const { name, company_id } = await request.json()
+    
+    const body = await request.json()
+    const { name, warehouse_id } = body
 
-    let finalCompanyId = company_id || null
+    let finalWarehouseId = warehouse_id || null
+    
+    // Jika role admin, paksa gunakan warehouse miliknya sendiri
     if (profile.role === 'admin') {
-      // Admin otomatis mengambil company dari warehouse
-      const { data: wh } = await supabase
-        .from('dim_warehouses')
-        .select('branch_id, dim_branch(company_id)')
-        .eq('id', profile.wh_id)
-        .single()
-      finalCompanyId = wh?.dim_branch?.company_id || null
+      if (!profile.wh_id) {
+        return NextResponse.json({ error: 'Warehouse ID tidak ditemukan pada profil admin' }, { status: 400 })
+      }
+      finalWarehouseId = profile.wh_id
+    }
+
+    if (!name) {
+      return NextResponse.json({ error: 'Nama brand wajib diisi' }, { status: 400 })
     }
 
     const { data, error } = await supabase
       .from('dim_product_brand')
-      .insert({ name, company_id: finalCompanyId })
+      .insert({ 
+        name, 
+        warehouse_id: finalWarehouseId 
+      })
       .select()
       .single()
+
     if (error) throw error
+    
     return NextResponse.json(data, { status: 201 })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 400 })
+    console.error('POST /api/brands error:', e)
+    return NextResponse.json({ error: e.message || 'Terjadi kesalahan server' }, { status: 500 })
   }
 }

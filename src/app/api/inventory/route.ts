@@ -29,7 +29,7 @@ export async function GET(request: Request) {
         is_damage,
         inbound_header_id,
         updated_at,
-        dim_products!inner(id, name, product_code, uom_id, dim_product_uom!left(name, conversion_factor)),
+        dim_products!inner(id, name, product_code, uom_id),
         dim_location!inner(id, name, barcode),
         dim_warehouses!inner(id, name)`,
         { count: 'exact' }
@@ -54,6 +54,30 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
+    const uomIds = Array.from(
+      new Set(
+        (data || [])
+          .map((item: any) => item?.dim_products?.uom_id)
+          .filter((value: any) => value !== null && value !== undefined)
+      )
+    )
+
+    let uomNameMap = new Map<string, string>()
+    if (uomIds.length > 0) {
+      const { data: uomData, error: uomError } = await supabase
+        .from('dim_product_uom')
+        .select('id, name')
+        .in('id', uomIds)
+
+      if (!uomError) {
+        ;(uomData || []).forEach((uom: any) => {
+          if (uom?.id != null) {
+            uomNameMap.set(String(uom.id), uom.name || '-')
+          }
+        })
+      }
+    }
+
     const inventory = (data || []).map((item: any) => ({
       id: item.id,
       warehouse_id: item.warehouse_id,
@@ -61,7 +85,7 @@ export async function GET(request: Request) {
       location_id: item.location_id,
       product_name: item.dim_products?.name || '-',
       product_code: item.dim_products?.product_code || '-',
-      uom_name: item.dim_products?.dim_product_uom?.name || '-',
+      uom_name: uomNameMap.get(String(item.dim_products?.uom_id)) || '-',
       location_name: item.dim_location?.name || '-',
       location_barcode: item.dim_location?.barcode || '-',
       warehouse_name: item.dim_warehouses?.name || '-',

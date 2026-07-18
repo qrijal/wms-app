@@ -37,7 +37,16 @@ export const superadminMenu = [
 
 export const adminMenu = [
   { label: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' },
-  { label: 'Master Product', icon: Boxes, path: '/master-product' },
+  {
+    label: 'Master Data',
+    icon: Package,
+    children: [
+      { label: 'Brands', icon: Package, path: '/brands' },
+      { label: 'UOMs', icon: Package, path: '/uoms' },
+      { label: 'Products', icon: Package, path: '/master-product' },
+      { label: 'Locations', icon: MapPin, path: '/master-location' },
+    ],
+  },
   { label: 'Master Location', icon: MapPin, path: '/master-location' },
   {
     label: 'Transaksi',

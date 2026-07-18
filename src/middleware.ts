@@ -1,3 +1,4 @@
+// src/middleware.ts
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
@@ -53,7 +54,6 @@ export async function middleware(request: NextRequest) {
     .single()
 
   if (error || !profile) {
-    // Jika profil tidak ada, arahkan ke setup (untuk superadmin pertama)
     const url = request.nextUrl.clone()
     url.pathname = '/setup'
     return NextResponse.redirect(url)
@@ -63,22 +63,22 @@ export async function middleware(request: NextRequest) {
   const isOperatorPath = pathname.startsWith('/operator')
   const isSuperadminPath = SUPERADMIN_PATHS.some(p => pathname.startsWith(p))
 
-  // Operator path hanya untuk operator atau admin (admin bisa monitoring)
   if (isOperatorPath && profile.role !== 'operator' && profile.role !== 'admin') {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  // Superadmin path hanya untuk superadmin
   if (isSuperadminPath && profile.role !== 'superadmin') {
     return NextResponse.redirect(new URL('/login', request.url))
   }
-
-  // 5. Role 'admin' hanya diizinkan mengakses path selain superadmin (sudah ditangani di atas)
-  //    Jika admin mencoba akses path lain yang tidak terdefinisi, tetap diizinkan (layout akan handle)
 
   return supabaseResponse
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
+  matcher: [
+    /*
+     * Matcher ini mencakup semua rute, kecuali aset statis
+     */
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.png$|.*\\.jpg$).*)',
+  ],
 }

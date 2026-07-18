@@ -8,7 +8,7 @@ export default async function UsersPage() {
   const { data: users } = await supabase
     .from('dim_users')
     .select('id, full_name, email, role, wh_id, dim_warehouses(name)')
-    .in('role', ['admin', 'operator'])  // ambil admin dan operator
+    .in('role', ['admin', 'operator'])
     .order('full_name')
 
   const { data: warehouses } = await supabase
@@ -18,11 +18,12 @@ export default async function UsersPage() {
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-4">
-        <h1 className="text-2xl font-bold">Manajemen Admin</h1>
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold text-slate-800">Manajemen Admin</h1>
         <AddUserButton warehouses={warehouses || []} />
       </div>
-      <UsersTable users={users || []} />
+      
+      <UsersTable users={users || []} warehouses={warehouses || []} />
     </div>
   )
 }
