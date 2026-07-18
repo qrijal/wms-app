@@ -32,7 +32,7 @@ interface DetailItem {
   putaway_details?: PutawayDetail[]
 }
 
-interface GrnTabProps { 
+interface GrnTabProps {
   headerId: number
   details: DetailItem[]
   currentStatus: string
@@ -120,6 +120,15 @@ export default function GrnTab({ headerId, details, currentStatus, onRefresh }: 
   }
 
   // ─── Renders ───────────────────────────────────────────────────────────────
+  if (status === 'CANCELED') {
+    return (
+      <div className="space-y-6 print:m-0 print:p-0">
+        <div className="p-6 bg-red-50 border border-red-200 rounded-xl text-red-700 font-semibold text-center flex items-center justify-center gap-2">
+          <AlertTriangle size={20} /> Dokumen telah dibatalkan. Laporan penerimaan tidak berlaku.
+        </div>
+      </div>
+    )
+  }
   const isDone = status === 'GRN' || status === 'COMPLETED'
 
   return (
@@ -135,9 +144,9 @@ export default function GrnTab({ headerId, details, currentStatus, onRefresh }: 
             <p className="text-sm text-emerald-700/90 mt-1">Dokumen inbound telah dikunci dan stok barang fisik sudah resmi ditambahkan ke dalam database WMS.</p>
           </div>
           <div className="sm:ml-auto mt-2 sm:mt-0">
-             <Button onClick={() => window.print()} variant="secondary" className="bg-white border-emerald-300 text-emerald-700 hover:bg-emerald-100 font-bold">
-               Cetak Bukti GRN
-             </Button>
+            <Button onClick={() => window.print()} variant="secondary" className="bg-white border-emerald-300 text-emerald-700 hover:bg-emerald-100 font-bold">
+              Cetak Bukti GRN
+            </Button>
           </div>
         </div>
       ) : (
@@ -152,7 +161,7 @@ export default function GrnTab({ headerId, details, currentStatus, onRefresh }: 
                 <p className="text-sm text-slate-500">Pengecekan final fisik pallet vs lokasi rak sebelum menutup Inbound.</p>
               </div>
             </div>
-            
+
             <div className="text-left sm:text-right shrink-0 bg-slate-50 px-4 py-2 rounded-lg border border-slate-100">
               <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-0.5">Total Diterima</p>
               <p className="text-xl font-black text-slate-800">{totalReceived} <span className="text-sm font-medium text-slate-500">unit</span></p>
@@ -226,11 +235,11 @@ export default function GrnTab({ headerId, details, currentStatus, onRefresh }: 
                     <td className="px-6 py-4 text-center">
                       {row.is_damage ? (
                         <span className="inline-flex items-center gap-1 text-[11px] font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded border border-red-200">
-                          <AlertTriangle size={12}/> RUSAK
+                          <AlertTriangle size={12} /> RUSAK
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-200">
-                          <CheckCircle2 size={12}/> BAGUS
+                          <CheckCircle2 size={12} /> BAGUS
                         </span>
                       )}
                     </td>

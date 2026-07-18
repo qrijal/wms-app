@@ -314,6 +314,16 @@ export default function ReceivingTab({
   }
 
   // ── Renders ──────────────────────────────────────────────────────────────
+  if (headerStatus === 'CANCELED') {
+    return(
+      <div className="space-y-6 print:m-0 print:p-0">
+        <div className="p-6 bg-red-50 border border-red-200 rounded-xl text-red-700 font-semibold text-center flex items-center justify-center gap-2">
+          <AlertTriangle size={20} /> Dokumen telah dibatalkan. Laporan penerimaan tidak berlaku.
+        </div>
+      </div>
+    )
+  }
+
   if (headerStatus === 'GRN' || headerStatus === 'COMPLETED') {
     return (
       <div className="space-y-6 print:m-0 print:p-0">

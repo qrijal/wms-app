@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     // Data warehouse admin
     const { data: warehouse } = await supabase
       .from('dim_warehouses')
-      .select('id, name, branch_id, dim_branch(name, company_id, dim_company(name))')
+      .select('id, name, branch_id')
       .eq('id', profile.wh_id)
       .single()
 
@@ -27,9 +27,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Warehouse tidak ditemukan' }, { status: 400 })
     }
 
+    const { data: branch } = await supabase
+      .from('dim_branch')
+      .select('name, company_id')
+      .eq('id', warehouse.branch_id)
+      .maybeSingle()
+
+    const { data: company } = await supabase
+      .from('dim_company')
+      .select('name')
+      .eq('id', branch?.company_id)
+      .maybeSingle()
+
     const adminWhName = warehouse.name
-    const adminBranchName = warehouse.dim_branch?.[0]?.name || ''
-    const adminCompanyName = warehouse.dim_branch?.[0]?.dim_company?.[0]?.name || ''
+    const adminBranchName = branch?.name || ''
+    const adminCompanyName = company?.name || ''
 
     // Baca CSV
     const text = await file.text()
@@ -45,6 +57,7 @@ export async function POST(request: Request) {
     const whIdx = headerLine.indexOf('wh_name')
     const codeIdx = headerLine.indexOf('product_code')
     const qtyIdx = headerLine.indexOf('qty')
+    const batchIdx = headerLine.indexOf('batch_number')
 
     if (codeIdx === -1 || qtyIdx === -1) {
       return NextResponse.json({ error: 'Header CSV harus memiliki product_code dan qty' }, { status: 400 })
@@ -76,6 +89,7 @@ export async function POST(request: Request) {
       product_id: number
       product_code: string
       qty: number
+      batch_number : string
     }> = []
     const errors: string[] = []
 
@@ -86,6 +100,7 @@ export async function POST(request: Request) {
       const branchName = branchIdx !== -1 ? cols[branchIdx] : ''
       const productCode = cols[codeIdx]
       const qtyStr = cols[qtyIdx]
+      const batchNumber = cols[batchIdx]
 
       if (!productCode || !qtyStr) {
         errors.push(`Baris ${i + 1}: data tidak lengkap`)
@@ -128,7 +143,7 @@ export async function POST(request: Request) {
       }
 
       // Gabungkan qty jika product_code sama dalam satu CSV
-      const existing = items.find(item => item.product_code === productCode)
+      const existing = items.find(item => item.product_code === productCode )
       if (existing) {
         existing.qty += qty
       } else {
@@ -136,6 +151,7 @@ export async function POST(request: Request) {
           product_id: product.id,
           product_code: product.product_code,
           qty,
+          batch_number: ''
         })
       }
     }
@@ -171,6 +187,7 @@ export async function POST(request: Request) {
       product_id: item.product_id,
       product_code: item.product_code,
       qty: item.qty,
+      batch_number: item.batch_number,
     }))
 
     const { error: detailErr } = await supabase

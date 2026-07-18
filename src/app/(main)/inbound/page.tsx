@@ -4,14 +4,19 @@ import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { Suspense } from 'react'
 import InboundSearch from '@/components/inbound/InboundSearch'
+import { revalidatePath } from 'next/cache'
+import CancelInboundButton from '@/components/inbound/CancelInboundButton'
+import InboundActionMenu from '@/components/inbound/InboundActionMenu'
 
 const PAGE_SIZE = 20
 
+// Konfigurasi status, pastikan "CANCELED" terdaftar di sini
 const STATUS_CFG: Record<string, { label: string; cls: string; dot: string }> = {
   DRAFT: { label: 'Draft', cls: 'bg-gray-100 text-gray-600', dot: 'bg-gray-400' },
   RECEIVING: { label: 'Receiving', cls: 'bg-amber-100 text-amber-700', dot: 'bg-amber-400' },
   PUTAWAY: { label: 'Putaway', cls: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
   GRN: { label: 'GRN Done', cls: 'bg-green-100 text-green-700', dot: 'bg-green-500' },
+  CANCELED: { label: 'Canceled', cls: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
 }
 
 interface PageProps {
@@ -38,6 +43,28 @@ export default async function InboundListPage({ searchParams }: PageProps) {
 
   const profile = await getUserProfile()
   const supabase = await createClient()
+
+  // --- SERVER ACTION UNTUK UPDATE STATUS KE CANCELED ---
+  const cancelInbound = async (formData: FormData) => {
+    'use server'
+    const id = formData.get('id') as string
+    if (!id) return
+
+    const supabaseServer = await createClient()
+
+    // Melakukan update ke tabel inbound_header
+    const { error } = await supabaseServer
+      .from('inbound_header')
+      .update({ status: 'CANCELED' })
+      .eq('id', id)
+
+    if (error) {
+      console.error('Gagal membatalkan inbound:', error)
+    } else {
+      // Me-refresh cache halaman agar perubahan status langsung terlihat di tabel
+      revalidatePath('/inbound')
+    }
+  }
 
   const applyCommonFilters = (query: any) => {
     if (profile.role !== 'superadmin') {
@@ -126,6 +153,7 @@ export default async function InboundListPage({ searchParams }: PageProps) {
                 inbounds.map((inv: any) => {
                   const cfg = STATUS_CFG[inv.status] ?? { label: inv.status, cls: 'bg-gray-100 text-gray-600', dot: 'bg-gray-400' }
                   const itemCount = inv.inbound_detail?.[0]?.count ?? 0
+
                   return (
                     <tr key={inv.id} className="hover:bg-blue-50/40 transition-colors group">
                       <td className="px-4 py-3">
@@ -133,32 +161,46 @@ export default async function InboundListPage({ searchParams }: PageProps) {
                           {inv.ref_no || <span className="text-gray-400 font-normal">—</span>}
                         </span>
                       </td>
+
                       <td className="px-4 py-3 text-gray-500 tabular-nums">
                         {new Date(inv.inbound_date).toLocaleDateString('id-ID', {
                           day: '2-digit', month: 'short', year: 'numeric'
                         })}
                       </td>
+
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${cfg.cls}`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
                           {cfg.label}
                         </span>
                       </td>
+
                       <td className="px-4 py-3 text-center">
                         <span className="inline-flex items-center justify-center w-6 h-6 bg-gray-100 text-gray-700 text-xs font-semibold rounded-full">
                           {itemCount}
                         </span>
                       </td>
+
                       <td className="px-4 py-3 text-right">
-                        <Link
-                          href={`/inbound/${inv.id}`}
-                          className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-800 transition-colors px-2.5 py-1 rounded-md hover:bg-blue-50"
-                        >
-                          details
-                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                          </svg>
-                        </Link>
+                        <div className="flex items-center justify-end gap-2">
+                          {/* Tombol Details */}
+                          <Link
+                            href={`/inbound/${inv.id}`}
+                            className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-800 transition-colors px-2.5 py-1.5 rounded-md hover:bg-blue-50"
+                          >
+                            Details
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                            </svg>
+                          </Link>
+
+                          {/* Menu Dropdown Kebab (Titik Tiga) */}
+                          <InboundActionMenu
+                            id={inv.id}
+                            status={inv.status}
+                            cancelAction={cancelInbound}
+                          />
+                        </div>
                       </td>
                     </tr>
                   )
@@ -211,8 +253,8 @@ export default async function InboundListPage({ searchParams }: PageProps) {
                     key={p}
                     href={buildPageUrl(p)}
                     className={`px-3 py-1.5 text-xs font-medium rounded-md border transition ${p === currentPage
-                        ? 'bg-blue-600 text-white border-blue-600'
-                        : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
                       }`}
                   >
                     {p}

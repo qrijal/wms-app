@@ -86,7 +86,7 @@ export default function InboundProcess({
               onClick={() => router.back()} 
               className="mt-1.5 p-2 border-2 border-slate-200 rounded-full text-slate-400 hover:text-slate-600 hover:border-slate-300 hover:bg-slate-50 transition-all"
             >
-              <ArrowLeft size={24} />
+              <ArrowLeft size={20} />
             </button>
             
             {/* Info Dokumen */}

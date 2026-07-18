@@ -5,7 +5,7 @@ import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import Alert from '@/components/ui/Alert'
 import { createClient } from '@/lib/supabase/client'
-import { CloudUpload, Download, Info, Eye, FileText, CheckCircle2, ArrowDownToLine } from 'lucide-react'
+import { ArrowLeft, CloudUpload, Download, Info, Eye, FileText, CheckCircle2, ArrowDownToLine } from 'lucide-react'
 
 export default function CreateInboundPage() {
   const [notes, setNotes] = useState('')
@@ -36,19 +36,31 @@ export default function CreateInboundPage() {
 
       if (!profile?.wh_id) return
 
-      const { data: wh } = await supabase
+      const { data: warehouse } = await supabase
         .from('dim_warehouses')
-        .select('name, dim_branch(name, dim_company(name))')
+        .select('id, name, branch_id')
         .eq('id', profile.wh_id)
         .single()
 
-      if (wh) {
-        setWarehouseInfo({
-          companyName: wh.dim_branch?.[0]?.dim_company?.[0]?.name || '',
-          branchName: wh.dim_branch?.[0]?.name || '',
-          whName: wh.name,
-        })
-      }
+      if (!warehouse?.branch_id) return
+
+      const { data: branch } = await supabase
+        .from('dim_branch')
+        .select('name, company_id')
+        .eq('id', warehouse.branch_id)
+        .single()
+
+      const { data: company } = await supabase
+        .from('dim_company')
+        .select('name')
+        .eq('id', branch?.company_id)
+        .single()
+
+      setWarehouseInfo({
+        companyName: company?.name || '',
+        branchName: branch?.name || '',
+        whName: warehouse.name || '',
+      })
     }
     fetchWarehouseInfo()
   }, [supabase])
@@ -58,7 +70,7 @@ export default function CreateInboundPage() {
       setError('Data warehouse belum tersedia. Mohon tunggu sebentar.')
       return
     }
-    const header = 'company_name,branch_name,wh_name,surat_jalan,inbound_date,product_code,qty\n'
+    const header = 'company_name,branch_name,wh_name,surat_jalan,inbound_date,product_code,qty,batch_number\n'
     const exampleRow = [
       warehouseInfo.companyName,
       warehouseInfo.branchName,
@@ -117,9 +129,18 @@ export default function CreateInboundPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-12">
       {/* Header Section */}
+      <div className='flex flex-row gap-4' >
+        <button
+        onClick={() => router.back()}
+        className="mt-1.5 p-4 border-2 border-slate-200 rounded-full text-slate-400 hover:text-slate-600 hover:border-slate-300 hover:bg-slate-50 transition-all"
+      >
+        <ArrowLeft size={20} />
+      </button>
       <div>
+
         <h1 className="text-2xl font-bold text-slate-800">Buat Inbound Baru</h1>
         <p className="text-sm text-slate-500 mt-1">Unggah file CSV untuk memproses data inbound secara massal.</p>
+      </div>
       </div>
 
       {error && <Alert type="error" message={error} onClose={() => setError('')} />}

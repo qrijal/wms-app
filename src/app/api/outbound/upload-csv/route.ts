@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     // Data warehouse admin
     const { data: warehouse } = await supabase
       .from('dim_warehouses')
-      .select('id, name, branch_id, dim_branch(name, company_id, dim_company(name))')
+      .select('id, name, branch_id')
       .eq('id', profile.wh_id)
       .single()
 
@@ -26,10 +26,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Warehouse tidak ditemukan' }, { status: 400 })
     }
 
+    const { data: branch } = await supabase
+      .from('dim_branch')
+      .select('name, company_id')
+      .eq('id', warehouse.branch_id)
+      .maybeSingle()
+
+    const { data: company } = await supabase
+      .from('dim_company')
+      .select('name')
+      .eq('id', branch?.company_id)
+      .maybeSingle()
+
     const adminBranchId = warehouse.branch_id
     const adminWhName = warehouse.name
-    const adminBranchName = warehouse.dim_branch?.[0]?.name || ''
-    const adminCompanyName = warehouse.dim_branch?.[0]?.dim_company?.[0]?.name || ''
+    const adminBranchName = branch?.name || ''
+    const adminCompanyName = company?.name || ''
 
     // Baca CSV
     const text = await file.text()
