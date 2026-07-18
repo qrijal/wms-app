@@ -54,12 +54,15 @@ export async function POST(
 
     // 3. Update stok untuk setiap alokasi
     for (const item of putawayItems) {
-      const productId = item.inbound_receiving_detail?.inbound_detail?.product_id
+      const inboundReceivingDetail = Array.isArray(item.inbound_receiving_detail)
+        ? item.inbound_receiving_detail[0]
+        : item.inbound_receiving_detail
+      const productId = inboundReceivingDetail?.inbound_detail?.[0]?.product_id
       if (!productId) {
         console.error('Missing product_id in item:', item)
         continue // lewati item yang tidak valid
       }
-      const isDamage = item.inbound_receiving_detail?.is_damage ?? false
+      const isDamage = inboundReceivingDetail?.is_damage ?? false
 
       console.log('Upserting inventory:', {
         warehouse: header.warehouse_id,

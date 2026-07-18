@@ -32,7 +32,8 @@ export default async function UomsPage() {
   uoms = (data || []).map(item => ({
     id: item.id,
     name: item.name,
-    warehouse_name: item.dim_warehouses?.name || item.dim_warehouses?.[0]?.name || 'Global',
+    warehouse_name: item.dim_warehouses?.[0]?.name || 'Global',
+    
   }))
 
   // Ambil daftar warehouse untuk dropdown superadmin

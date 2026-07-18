@@ -17,7 +17,7 @@ export default function CreateInboundPage() {
     branchName: string
     whName: string
   } | null>(null)
-  
+
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const supabase = createClient()
@@ -44,8 +44,8 @@ export default function CreateInboundPage() {
 
       if (wh) {
         setWarehouseInfo({
-          companyName: wh.dim_branch?.dim_company?.name || '',
-          branchName: wh.dim_branch?.name || '',
+          companyName: wh.dim_branch?.[0]?.dim_company?.[0]?.name || '',
+          branchName: wh.dim_branch?.[0]?.name || '',
           whName: wh.name,
         })
       }
@@ -128,7 +128,7 @@ export default function CreateInboundPage() {
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-6">
         <div className="flex justify-between items-center">
           <h2 className="font-semibold text-slate-800">Upload File CSV</h2>
-          <button 
+          <button
             onClick={downloadTemplate}
             className="flex items-center gap-2 text-sm font-semibold text-blue-600 hover:text-blue-800 transition-colors"
           >
@@ -145,7 +145,7 @@ export default function CreateInboundPage() {
             onChange={handleFileChange}
             className="hidden"
           />
-          
+
           {!file ? (
             <div className="flex items-center gap-4">
               <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center shrink-0">
@@ -155,8 +155,8 @@ export default function CreateInboundPage() {
                 <p className="text-sm font-semibold text-slate-800">Pilih file CSV atau tarik ke sini</p>
                 <p className="text-xs text-slate-500 mt-0.5">Maksimal ukuran file 10MB</p>
               </div>
-              <Button 
-                variant="secondary" 
+              <Button
+                variant="secondary"
                 className="ml-4 bg-white"
                 onClick={() => fileInputRef.current?.click()}
               >
@@ -171,14 +171,14 @@ export default function CreateInboundPage() {
                   <p className="text-sm font-semibold text-slate-800 truncate">{file.name}</p>
                   <p className="text-xs text-slate-500">{(file.size / 1024).toFixed(2)} KB</p>
                 </div>
-                <button 
+                <button
                   onClick={() => setFile(null)}
                   className="text-xs font-semibold text-red-500 hover:text-red-700"
                 >
                   Hapus
                 </button>
               </div>
-              
+
               <div className="w-full max-w-md text-left space-y-3">
                 <Input
                   label="Catatan Opsional"
@@ -186,12 +186,12 @@ export default function CreateInboundPage() {
                   onChange={(e) => setNotes(e.target.value)}
                   placeholder="Tambahkan catatan untuk Inbound ini..."
                 />
-                <Button 
-                  onClick={handleSubmit} 
-                  disabled={loading} 
+                <Button
+                  onClick={handleSubmit}
+                  disabled={loading}
                   className="w-full justify-center flex gap-2"
                 >
-                  {loading ? 'Mengupload...' : <><CloudUpload size={18}/> Proses Inbound</>}
+                  {loading ? 'Mengupload...' : <><CloudUpload size={18} /> Proses Inbound</>}
                 </Button>
               </div>
             </div>

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { requireSuperadmin } from '@/lib/permissions'
 import { createClient } from '@/lib/supabase/server'
 
+
 export async function GET(request: Request) {
   try {
     await requireSuperadmin()

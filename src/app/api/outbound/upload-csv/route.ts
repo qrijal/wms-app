@@ -28,8 +28,8 @@ export async function POST(request: Request) {
 
     const adminBranchId = warehouse.branch_id
     const adminWhName = warehouse.name
-    const adminBranchName = warehouse.dim_branch?.name || ''
-    const adminCompanyName = warehouse.dim_branch?.dim_company?.name || ''
+    const adminBranchName = warehouse.dim_branch?.[0]?.name || ''
+    const adminCompanyName = warehouse.dim_branch?.[0]?.dim_company?.[0]?.name || ''
 
     // Baca CSV
     const text = await file.text()
