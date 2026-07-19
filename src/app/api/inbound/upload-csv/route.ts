@@ -1,7 +1,66 @@
-// src/app/api/inbound/upload-csv/route.ts
+//src\app\api\inbound\upload-csv\route.ts
 import { NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/permissions'
 import { createClient } from '@/lib/supabase/server'
+
+// --- FUNGSI HELPER UNTUK MENGUBAH TANGGAL ---
+function formatDateToISO(dateStr: string): string | null {
+  if (!dateStr) return null;
+
+  const cleaned = dateStr.trim();
+  const parts = cleaned.split(/[\/\-]/); // Memisahkan karakter "/" atau "-"
+  // 1. Definisikan kolom wajib sesuai format
+  const REQUIRED_COLUMNS = [
+    'company_name',
+    'branch_name',
+    'wh_name',
+    'surat_jalan',
+    'inbound_date',
+    'product_code',
+    'qty',
+    'batch_number',
+    'expired_date'
+  ];
+
+  // 2. Buat fungsi validasi
+  function validateUploadData(parsedData: any[]) {
+    // Cek apakah file kosong
+    if (!parsedData || parsedData.length === 0) {
+      throw new Error("File is empty or no data found.");
+    }
+
+    // Cek setiap baris data
+    for (let i = 0; i < parsedData.length; i++) {
+      const row = parsedData[i];
+
+      // Cek setiap kolom wajib di baris tersebut
+      for (const col of REQUIRED_COLUMNS) {
+        // Jika kolom tidak ada, bernilai null, undefined, atau string kosong
+        if (row[col] === undefined || row[col] === null || String(row[col]).trim() === '') {
+          // Lemparkan error yang spesifik agar user tahu baris mana yang salah
+          throw new Error(`Upload failed: Row ${i + 1} is incomplete. Column '${col}' is missing or empty.`);
+        }
+      }
+    }
+
+    return true; // Jika lolos semua, kembalikan true
+  }
+  if (parts.length === 3) {
+    // Jika format sudah YYYY-MM-DD (Tahun di depan)
+    if (parts[0].length === 4) {
+      return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+    }
+    // Jika format DD/MM/YYYY (Tahun di belakang, standar CSV Excel Indonesia)
+    if (parts[2].length === 4) {
+      const dd = parts[0].padStart(2, '0');
+      const mm = parts[1].padStart(2, '0');
+      const yyyy = parts[2];
+      return `${yyyy}-${mm}-${dd}`;
+    }
+  }
+
+  return cleaned; // Kembalikan default jika format aneh
+}
 
 export async function POST(request: Request) {
   try {
@@ -58,6 +117,7 @@ export async function POST(request: Request) {
     const codeIdx = headerLine.indexOf('product_code')
     const qtyIdx = headerLine.indexOf('qty')
     const batchIdx = headerLine.indexOf('batch_number')
+    const expIdx = headerLine.indexOf('expired_date')
 
     if (codeIdx === -1 || qtyIdx === -1) {
       return NextResponse.json({ error: 'Header CSV harus memiliki product_code dan qty' }, { status: 400 })
@@ -89,7 +149,8 @@ export async function POST(request: Request) {
       product_id: number
       product_code: string
       qty: number
-      batch_number : string
+      batch_number: string
+      expired_date: string | null
     }> = []
     const errors: string[] = []
 
@@ -100,13 +161,14 @@ export async function POST(request: Request) {
       const branchName = branchIdx !== -1 ? cols[branchIdx] : ''
       const productCode = cols[codeIdx]
       const qtyStr = cols[qtyIdx]
-      const batchNumber = cols[batchIdx]
+      const batchNumber = batchIdx !== -1 ? cols[batchIdx] : ''
+      const expiredDateStr = expIdx !== -1 ? cols[expIdx] : ''
 
       if (!productCode || !qtyStr) {
         errors.push(`Baris ${i + 1}: data tidak lengkap`)
         continue
       }
-      
+
       const qty = Number(qtyStr)
       if (isNaN(qty) || qty <= 0) {
         errors.push(`Baris ${i + 1}: qty tidak valid`)
@@ -119,7 +181,7 @@ export async function POST(request: Request) {
         continue
       }
 
-      // Validasi opsional: company_name & branch_name jika diisi harus cocok
+      // Validasi opsional: company_name & branch_name
       if (companyName && companyName !== adminCompanyName) {
         errors.push(`Baris ${i + 1}: company_name tidak sesuai`)
         continue
@@ -129,7 +191,7 @@ export async function POST(request: Request) {
         continue
       }
 
-      // Cari produk berdasarkan product_code & warehouse_id (Sesuai update skema terbaru)
+      // Cari produk berdasarkan product_code & warehouse_id
       const { data: product } = await supabase
         .from('dim_products')
         .select('id, product_code')
@@ -142,8 +204,16 @@ export async function POST(request: Request) {
         continue
       }
 
-      // Gabungkan qty jika product_code sama dalam satu CSV
-      const existing = items.find(item => item.product_code === productCode )
+      const safeBatchNumber = batchNumber || ''
+      const safeExpiredDate = formatDateToISO(expiredDateStr)
+
+      // Gabungkan qty jika product_code, batch_number, dan expired_date sama
+      const existing = items.find(item =>
+        item.product_code === productCode &&
+        item.batch_number === safeBatchNumber &&
+        item.expired_date === safeExpiredDate
+      )
+
       if (existing) {
         existing.qty += qty
       } else {
@@ -151,16 +221,25 @@ export async function POST(request: Request) {
           product_id: product.id,
           product_code: product.product_code,
           qty,
-          batch_number: ''
+          batch_number: safeBatchNumber,
+          expired_date: safeExpiredDate
         })
       }
     }
 
-    if (items.length === 0) {
-      return NextResponse.json({ error: 'Tidak ada item valid. ' + errors.join('; ') }, { status: 400 })
+    // 1. VALIDASI KETAT
+    if (errors.length > 0) {
+      return NextResponse.json({
+        error: 'Upload dibatalkan karena terdapat baris yang tidak valid. Harap perbaiki CSV Anda: ' + errors.join(' | ')
+      }, { status: 400 })
     }
 
-    // Buat inbound header
+    // 2. Cegah jika file CSV kosong
+    if (items.length === 0) {
+      return NextResponse.json({ error: 'File CSV tidak memiliki data item.' }, { status: 400 })
+    }
+
+    // 3. Buat inbound header
     const { data: header, error: headerErr } = await supabase
       .from('inbound_header')
       .insert({
@@ -181,28 +260,34 @@ export async function POST(request: Request) {
       throw headerErr
     }
 
-    // Insert detail (tanpa qty_received, qty_putaway)
+    // 4. Insert detail
     const detailData = items.map(item => ({
       header_id: header.id,
       product_id: item.product_id,
       product_code: item.product_code,
       qty: item.qty,
-      batch_number: item.batch_number,
+      batch_number: item.batch_number || null,
+      expired_date: item.expired_date
     }))
 
     const { error: detailErr } = await supabase
       .from('inbound_detail')
       .insert(detailData)
 
-    if (detailErr) throw detailErr
+    // PERBAIKAN: ROLLBACK HEADER JIKA DETAIL GAGAL
+    if (detailErr) {
+      await supabase.from('inbound_header').delete().eq('id', header.id)
+      return NextResponse.json({
+        error: `Gagal menyimpan detail produk ke database. File dibatalkan. (Pesan: ${detailErr.message})`
+      }, { status: 400 })
+    }
 
     return NextResponse.json({
       success: true,
       header_id: header.id,
       item_count: items.length,
-      warnings: errors.length > 0 ? errors : undefined,
     }, { status: 201 })
-    
+
   } catch (error: any) {
     console.error('Upload CSV error:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })

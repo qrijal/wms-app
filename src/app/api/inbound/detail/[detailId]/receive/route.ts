@@ -1,3 +1,4 @@
+//src\app\api\inbound\detail\[detailId]\receive\route.ts
 import { NextResponse } from 'next/server'
 import { getUserProfile } from '@/lib/permissions'
 import { createClient } from '@/lib/supabase/server'

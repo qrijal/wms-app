@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import DashboardLayout from '@/components/layouts/DashboardLayout'
+import { Toaster } from 'react-hot-toast' // 1. Tambahkan import ini
 
 export default async function MainLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -16,5 +17,16 @@ export default async function MainLayout({ children }: { children: React.ReactNo
 
   if (!profile) redirect('/setup')
 
-  return <DashboardLayout>{children}</DashboardLayout>
+  // 2. Letakkan Toaster di sini
+  return (
+    <>
+      <Toaster position="top-right" reverseOrder={false}
+        toastOptions={{
+          style: {
+            marginTop: '70px', // <-- Menggeser posisi toast turun ke bawah header
+          },
+        }} />
+      <DashboardLayout>{children}</DashboardLayout>
+    </>
+  )
 }

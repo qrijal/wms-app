@@ -18,8 +18,10 @@ interface InventoryItem {
   product_id: number
   location_id: number
   qty: number
+  pallet_id:string
   damage: boolean
   inbound_header_id?: number | null
+  batch_number:string
   updated_at: string
 }
 
@@ -201,12 +203,12 @@ export default function InventoryClient({ role, warehouses, userWhId }: Inventor
   }
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE)
-  const columns = ['Produk', 'Kode (UOM)', 'Lokasi', 'Qty', 'Damage', 'Last Update', 'Aksi']
+  const columns = ['Produk', 'Kode (UOM)', 'Lokasi', 'Qty', 'Batch','Damage', 'Pallet ID', 'Aksi']
 
   return (
     <div className="space-y-4">
       {/* Filter Bar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm sticky">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
           <div>
             <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Kode Produk</label>
@@ -284,6 +286,7 @@ export default function InventoryClient({ role, warehouses, userWhId }: Inventor
                       {item.location_name} <span className="text-xs text-slate-400">({item.location_barcode})</span>
                     </td>
                     <td className="px-6 py-4 text-sm font-bold text-slate-800">{item.qty.toLocaleString('id-ID')}</td>
+                    <td className="px-6 py-4 text-xs text-slate-500">{item.batch_number}</td>
                     <td className="px-6 py-4 text-sm">
                       {item.damage ? (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-100">
@@ -293,7 +296,7 @@ export default function InventoryClient({ role, warehouses, userWhId }: Inventor
                         <span className="text-slate-400">Tidak</span>
                       )}
                     </td>
-                    <td className="px-6 py-4 text-xs text-slate-500">{new Date(item.updated_at).toLocaleString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
+                    <td className="px-6 py-4 text-xs text-slate-500">{item.pallet_id}</td>
                     <td className="px-6 py-4 text-sm">
                       <button
                         onClick={() => openUpdateModal(item)}

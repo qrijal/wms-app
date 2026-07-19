@@ -27,7 +27,9 @@ export async function GET(request: Request) {
         qty,
         hold_qty,
         is_damage,
+        pallet_id,
         inbound_header_id,
+        batch_number,
         updated_at,
         dim_products!inner(id, name, product_code, uom_id),
         dim_location!inner(id, name, barcode),
@@ -94,6 +96,8 @@ export async function GET(request: Request) {
       damage: item.is_damage === true,
       inbound_header_id: item.inbound_header_id ?? null,
       updated_at: item.updated_at,
+      pallet_id:item.pallet_id,
+      batch_number:item.batch_number,
     }))
 
     return NextResponse.json({ data: inventory, count: count ?? 0 })

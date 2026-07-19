@@ -12,6 +12,7 @@
     "@fortawesome/fontawesome-svg-core": "^7.2.0",
     "@fortawesome/free-solid-svg-icons": "^7.2.0",
     "@fortawesome/react-fontawesome": "^3.3.1",
+    "@react-pdf/renderer": "^4.5.1",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.106.2",
     "exceljs": "^3.10.0",
@@ -19,14 +20,19 @@
     "json2csv": "^6.0.0-alpha.2",
     "lucide-react": "^1.16.0",
     "next": "^16.2.10",
+    "qrcode": "^1.5.4",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-barcode": "^1.6.1",
+    "react-dom": "^19.2.7",
+    "react-hot-toast": "^2.6.0",
+    "react-qr-code": "^2.2.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/json2csv": "^5.0.7",
     "@types/node": "^20",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

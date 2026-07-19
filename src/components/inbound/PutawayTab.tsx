@@ -1,15 +1,15 @@
+// src/components/inbound/PutawayTab.tsx
 'use client'
 import React, { useState, useEffect, useRef } from 'react'
 import Button from '@/components/ui/Button'
-import Input from '@/components/ui/Input'
 import Modal from '@/components/ui/Modal'
-import Alert from '@/components/ui/Alert'
-import { CheckCircle2, AlertTriangle, Trash2, ListChecks, MapPin, ScanLine } from 'lucide-react'
+import { toast } from 'react-hot-toast'
+import { Edit3, CheckCircle2, AlertTriangle, Trash2, ListChecks, MapPin, Search } from 'lucide-react'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface ReceivingDetail {
   id: number
-  pallet_id: string // ID Asli dari database (Hasil scan barcode)
+  pallet_id: string 
   qty_received: number
   is_damage: boolean
 }
@@ -83,12 +83,15 @@ export default function PutawayTab({
     remaining: number
     is_damage: boolean
   } | null>(null)
+
   const [selectedLocId, setSelectedLocId] = useState<string>('')
   const [qty, setQty] = useState<number>(1)
 
-  // State Notifikasi & Review
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
+  // State Baru untuk Fitur Search Lokasi & Validasi
+  const [locSearch, setLocSearch] = useState('')
+  const [locError, setLocError] = useState('')
+
+  // State Review
   const [showReview, setShowReview] = useState(false)
   const [confirming, setConfirming] = useState(false)
 
@@ -120,7 +123,19 @@ export default function PutawayTab({
     return receiving.qty_received - serverPutaway - cachePutaway
   }
 
-  // Flatten data agar mempermudah render & pencarian Scanner
+  const getAllocatedLocations = (detail: DetailItem, receivingId: number) => {
+    const serverLocs = (detail.putaway_details || [])
+      .filter(p => p.receiving_detail_id === receivingId)
+      .map(p => p.dim_location?.name || `Lokasi ID: ${p.location_id}`)
+
+    const cacheLocs = putawayCache
+      .filter(p => p.receivingDetailId === receivingId)
+      .map(p => p.location_name)
+
+    const allLocs = [...serverLocs, ...cacheLocs]
+    return Array.from(new Set(allLocs)) 
+  }
+
   const rows = details.flatMap(detail =>
     (detail.receiving_details || []).map(recv => ({
       detail,
@@ -134,30 +149,24 @@ export default function PutawayTab({
   // ── Actions: Barcode Scanner ─────────────────────────────────────────────
   const handleScanSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    setError('')
-    setSuccess('')
     const scannedVal = scanInput.trim().toUpperCase()
     if (!scannedVal) return
 
-    // 1. Cari pallet di dokumen ini (Cocokkan dengan Pallet ID asli dari Backend)
     const foundRow = rows.find(r => r.recv.pallet_id?.toUpperCase() === scannedVal)
 
     if (!foundRow) {
-      setError(`❌ Pallet ID [${scannedVal}] tidak ditemukan di dokumen ini! Pastikan Anda men-scan Pallet yang benar.`)
+      toast.error(`Pallet ID [${scannedVal}] tidak ditemukan di dokumen ini!`)
     } else if (foundRow.remaining <= 0) {
-      setError(`⚠️ Pallet ID [${scannedVal}] sudah dialokasikan sepenuhnya!`)
+      toast.error(`Pallet ID [${scannedVal}] sudah dialokasikan sepenuhnya!`)
     } else {
-      // 2. Jika ketemu, langsung buka modal untuk alokasi lokasi
       handleOpenModal(foundRow.detail, foundRow.recv, foundRow.remaining)
     }
 
-    setScanInput('') // Kosongkan input setelah di-scan agar siap untuk scan berikutnya
+    setScanInput('')
   }
 
   // ── Actions: Modal & Queue ───────────────────────────────────────────────
   const handleOpenModal = (detail: DetailItem, recv: ReceivingDetail, remaining: number) => {
-    setError('')
-    setSuccess('')
     setModalData({
       detail,
       receivingId: recv.id,
@@ -166,17 +175,24 @@ export default function PutawayTab({
       is_damage: recv.is_damage,
     })
     setSelectedLocId('')
-    setQty(remaining > 0 ? remaining : 1) // Default isi penuh sisa qty pallet
+    setLocSearch('')
+    setLocError('')
+    setQty(remaining > 0 ? remaining : 1)
   }
 
   const handleAddToCache = () => {
     if (!modalData) return
-    if (!selectedLocId) { setError('Silakan pilih lokasi terlebih dahulu'); return }
-    if (qty <= 0) { setError('Qty harus lebih besar dari 0'); return }
-    if (qty > modalData.remaining) { setError(`Maksimal alokasi adalah ${modalData.remaining}`); return }
+
+    if (!selectedLocId) {
+      setLocError('⚠️ Silakan pilih lokasi rak terlebih dahulu dari daftar di atas!')
+      return
+    }
+
+    if (qty <= 0) { setLocError('⚠️ Qty harus lebih besar dari 0'); return }
+    if (qty > modalData.remaining) { setLocError(`⚠️ Maksimal alokasi adalah ${modalData.remaining}`); return }
 
     const loc = locations.find(l => l.id.toString() === selectedLocId)
-    if (!loc) { setError('Lokasi tidak valid'); return }
+    if (!loc) { setLocError('⚠️ Lokasi tidak valid'); return }
 
     setPutawayCache(prev => [
       ...prev,
@@ -193,32 +209,28 @@ export default function PutawayTab({
       },
     ])
 
-    setSuccess(`✅ Pallet [${modalData.pallet_id}] berhasil masuk antrean lokasi ${loc.name}.`)
+    toast.success(`Pallet [${modalData.pallet_id}] masuk antrean lokasi ${loc.name}.`)
     setModalData(null)
 
-    // Auto-focus kembali ke scanner setelah modal ditutup
     setTimeout(() => scanInputRef.current?.focus(), 100)
   }
 
   // ── Actions: BULK API (Putaway) ────────────────────────────────────────────
   const handleFinalConfirm = async () => {
     setConfirming(true)
-    setError('')
     try {
-      // Siapkan Payload Array untuk API Bulk Insert Putaway
       const payload = putawayCache.map(item => ({
         receiving_detail_id: item.receivingDetailId,
         location_id: item.location_id,
         qty: item.qty
       }))
 
-      // Tembak API Putaway dengan Bulk Payload
       const res = await fetch('/api/inbound/putaway-details', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           items: payload,
-          headerId: headerId // Mengubah status header ke PUTAWAY
+          headerId: headerId
         }),
       })
 
@@ -230,14 +242,19 @@ export default function PutawayTab({
 
       setPutawayCache([])
       setShowReview(false)
-      setSuccess('Semua penempatan lokasi berhasil disimpan ke sistem!')
+      toast.success('Semua penempatan lokasi berhasil disimpan ke sistem!')
       await onRefresh()
     } catch (err: any) {
-      setError(err.message)
+      toast.error(err.message)
     } finally {
       setConfirming(false)
     }
   }
+
+  const filteredLocations = locations.filter(loc =>
+    loc.name.toLowerCase().includes(locSearch.toLowerCase()) ||
+    (loc.barcode && loc.barcode.toLowerCase().includes(locSearch.toLowerCase()))
+  )
 
   // ── Renders ──────────────────────────────────────────────────────────────
   if (headerStatus === 'CANCELED') {
@@ -249,53 +266,54 @@ export default function PutawayTab({
       </div>
     )
   }
-  if (headerStatus === 'GRN' || headerStatus === 'COMPLETED') {
-    return <div className="p-6 bg-green-50 border border-green-200 rounded-xl text-green-700 font-semibold text-center flex items-center justify-center gap-2"><CheckCircle2 size={20} /> Putaway telah selesai dan dokumen sudah berstatus GRN.</div>
-  }
-  if (headerStatus !== 'RECEIVING' && headerStatus !== 'PUTAWAY') {
-    return <div className="p-6 bg-yellow-50 border border-yellow-200 rounded-xl text-yellow-700 font-semibold text-center flex items-center justify-center gap-2"><AlertTriangle size={20} /> Proses Receiving belum selesai. Tidak dapat memproses Putaway.</div>
+
+  if (headerStatus !== 'RECEIVING' && headerStatus !== 'PUTAWAY' && headerStatus !== 'GRN') {
+    return (
+      <div className="p-6 bg-yellow-50 border border-yellow-200 rounded-xl text-yellow-700 font-semibold text-center flex items-center justify-center gap-2">
+        <AlertTriangle size={20} /> Proses Receiving belum selesai. Tidak dapat memproses Putaway.
+      </div>
+    )
   }
 
   return (
     <div className="space-y-6">
-      {error && <Alert type="error" message={error} onClose={() => setError('')} />}
-      {success && <Alert type="success" message={success} onClose={() => setSuccess('')} />}
-
-      {allPutawayDone && (
-        <div className="p-4 bg-green-50 border border-green-200 rounded-xl text-green-700 font-semibold text-center flex items-center justify-center gap-2">
-          <CheckCircle2 size={20} /> Semua item yang diterima telah dialokasikan ke lokasi masing-masing. Lanjut ke proses GRN.
+      {!(allPutawayDone || headerStatus === 'GRN') && ( 
+        <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm">
+          <div className="flex gap-2 items-center text-slate-700 font-semibold">
+            <CheckCircle2 size={20} className="text-green-600" /> Semua item yang diterima telah dialokasikan ke lokasi masing-masing. Lanjut ke proses GRN.
+          </div>
         </div>
       )}
 
-      {/* ── AREA SCANNER BARCODE (Disembunyikan jika Putaway Selesai) ── */}
+      {/* ── AREA SCANNER BARCODE ── */}
       {!allPutawayDone && (
-        <div className="bg-blue-50 border border-blue-200 p-5 rounded-xl shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div>
-            <h3 className="text-blue-800 font-bold text-lg flex items-center gap-2"><ScanLine size={20} /> Mode Scan Barcode</h3>
-            <p className="text-sm text-blue-600">Arahkan kursor ke kotak di samping lalu tembak QR Code Pallet.</p>
-          </div>
-          <form onSubmit={handleScanSubmit} className="w-full sm:w-1/2 flex items-center gap-2 relative">
+        <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm">
+          <h1 className='font-bold py-1 px-2 text-slate-800'>Pallet ID</h1>
+          <form onSubmit={handleScanSubmit} className="w-full relative">
             <input
               ref={scanInputRef}
               type="text"
-              placeholder="Scan Pallet ID di sini..."
+              placeholder="Search Pallet ID"
               value={scanInput}
               onChange={(e) => setScanInput(e.target.value)}
-              className="w-full pl-4 pr-10 py-3 border-2 border-blue-300 rounded-xl focus:border-blue-600 focus:ring-4 focus:ring-blue-100 outline-none text-slate-700 font-mono font-bold tracking-wider text-lg uppercase transition-all"
+              className="w-full pl-4 pr-20 py-2.5 bg-slate-50 border-2 border-slate-200 rounded-xl 
+          focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10 
+          outline-none text-slate-700 font-bold transition-all"
               autoFocus
             />
-            <Button type="submit" className="shrink-0 bg-blue-700 hover:bg-blue-800 absolute right-1 top-1 bottom-1 px-4 text-sm rounded-lg">Cari</Button>
+            <button
+              type="submit"
+              className="absolute right-1 top-1 bottom-1 px-4 bg-slate-800 hover:bg-blue-600 text-white text-xs font-bold rounded-lg transition-colors"
+            >
+              Search
+            </button>
           </form>
         </div>
       )}
 
       {/* Tabel Utama Daftar Putaway */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-          <div>
-            <h3 className="font-semibold text-slate-800 text-lg">Daftar Pallet Belum Masuk Rak</h3>
-            <p className="text-xs text-slate-500 mt-1">Gunakan scanner atau klik tombol "Atur Lokasi" secara manual.</p>
-          </div>
+        <div className="p-4 border-b border-slate-100 flex justify-end items-center bg-slate-50/50">
           {putawayCache.length > 0 && (
             <Button onClick={() => setShowReview(true)} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-900 shadow-sm">
               <ListChecks size={18} /> Review Antrean Rak ({putawayCache.length})
@@ -308,11 +326,11 @@ export default function PutawayTab({
             <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-semibold">
               <tr>
                 <th className="px-6 py-4">Pallet ID</th>
-                <th className="px-6 py-4">SKU / Produk</th>
-                <th className="px-6 py-4 text-center">Status Kondisi</th>
-                <th className="px-6 py-4 text-center">Total Item</th>
-                <th className="px-6 py-4 text-center">Sisa Belum Dialokasi</th>
-                <th className="px-6 py-4 text-right">Aksi</th>
+                <th className="px-6 py-4">Product Name</th>
+                <th className="px-6 py-4 text-center">Product Status</th>
+                <th className="px-6 py-4 text-center">Qty</th>
+                <th className="px-6 py-4 text-center">Location</th>
+                <th className="px-6 py-4 text-right"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm">
@@ -324,6 +342,7 @@ export default function PutawayTab({
                 rows.map((row, idx) => {
                   const isFull = row.remaining === 0
                   const uomName = row.detail.dim_products?.uom?.name || 'unit'
+                  const allocatedLocs = getAllocatedLocations(row.detail, row.recv.id)
 
                   return (
                     <tr key={idx} className={`hover:bg-slate-50 transition-colors ${isFull ? 'bg-slate-50/50 opacity-60' : ''}`}>
@@ -338,19 +357,25 @@ export default function PutawayTab({
                       </td>
                       <td className="px-6 py-4 text-center">
                         {row.recv.is_damage ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-red-50 text-red-600 border border-red-100"><AlertTriangle size={12} /> RUSAK</span>
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-sm font-bold bg-red-50 text-red-600 border border-red-100"><AlertTriangle size={12} /> Damage</span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-emerald-50 text-emerald-600 border border-emerald-100"><CheckCircle2 size={12} /> BAGUS</span>
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-sm font-bold bg-emerald-50 text-emerald-600 border border-emerald-100"><CheckCircle2 size={12} /> Good</span>
                         )}
                       </td>
                       <td className="px-6 py-4 text-center font-medium text-slate-700">
                         {row.recv.qty_received} <span className="text-xs text-slate-400">{uomName}</span>
                       </td>
                       <td className="px-6 py-4 text-center">
-                        {isFull ? (
-                          <span className="text-green-600 text-xs font-bold flex items-center justify-center gap-1"><CheckCircle2 size={14} /> RAK TEPAT</span>
+                        {allocatedLocs.length > 0 ? (
+                          <div className="flex flex-wrap justify-center gap-1.5 max-w-[150px] mx-auto">
+                            {allocatedLocs.map((loc, i) => (
+                              <span key={i} className="px-2 py-1 bg-indigo-50 border border-indigo-100 text-indigo-700 text-sm font-bold uppercase rounded-md">
+                                {loc}
+                              </span>
+                            ))}
+                          </div>
                         ) : (
-                          <span className="font-bold text-blue-600 text-lg">{row.remaining} <span className="text-xs text-blue-400 font-normal">{uomName}</span></span>
+                          <span className="text-sm text-slate-400 italic">Unallocated</span>
                         )}
                       </td>
                       <td className="px-6 py-4 text-right">
@@ -359,7 +384,7 @@ export default function PutawayTab({
                           disabled={isFull}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 text-slate-700 text-xs font-semibold rounded-lg hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
-                          <MapPin size={14} /> Atur Lokasi
+                          <Edit3 size={14} />
                         </button>
                       </td>
                     </tr>
@@ -373,7 +398,11 @@ export default function PutawayTab({
 
       {/* Modal Input untuk Penempatan Lokasi */}
       {modalData && (
-        <Modal onClose={() => setModalData(null)} title="Scan / Pilih Lokasi Rak">
+        <Modal
+          onClose={() => setModalData(null)}
+          title="Scan / Pilih Lokasi Rak"
+          className="w-[95vw] max-w-2xl" 
+        >
           <div className="space-y-5">
             {/* Header Informasi */}
             <div className={`p-4 rounded-xl border ${modalData.is_damage ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-200'}`}>
@@ -393,28 +422,66 @@ export default function PutawayTab({
               </div>
             </div>
 
+            {/* Input Search Lokasi Baru */}
             <div>
-              <label className="block text-sm font-semibold text-slate-800 mb-1.5 flex items-center gap-2">Pilih / Scan Lokasi Rak <MapPin size={16} className="text-slate-400" /></label>
-              <select
-                value={selectedLocId}
-                onChange={(e) => setSelectedLocId(e.target.value)}
-                className="w-full px-4 py-3 bg-white border-2 border-slate-300 rounded-xl font-bold text-slate-700 focus:border-blue-600 focus:ring-4 focus:ring-blue-100 outline-none transition-all"
-              >
-                <option value="" disabled>-- Pilih Rak / Bin / Area Tujuan --</option>
-                {locations.map(loc => (
-                  <option key={loc.id} value={loc.id}>{loc.name} {loc.barcode ? `[BARCODE: ${loc.barcode}]` : ''}</option>
-                ))}
-              </select>
-            </div>
+              <label className="block text-sm font-semibold text-slate-800 mb-1.5 flex items-center gap-2">
+                Pilih / Scan Lokasi Rak <MapPin size={16} className="text-slate-400" />
+              </label>
 
-            {/* Qty dikunci agar 1 pallet = 1 pemindahan utuh */}
-            <div className="hidden">
-              <Input label="Kuantitas (Qty)" type="number" value={qty} onChange={e => setQty(Number(e.target.value))} min={1} max={modalData.remaining} />
+              <div className="relative">
+                <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Ketik nama rak atau barcode untuk mencari..."
+                  value={locSearch}
+                  onChange={(e) => setLocSearch(e.target.value)}
+                  className={`w-full pl-10 pr-4 py-2.5 bg-white border-2 rounded-xl font-medium focus:ring-4 outline-none transition-all ${locError ? 'border-red-400 focus:border-red-600 focus:ring-red-100' : 'border-slate-300 focus:border-blue-600 focus:ring-blue-100 text-slate-700'
+                    }`}
+                />
+              </div>
+
+              {/* Teks Validasi Error */}
+              {locError && (
+                <p className="text-red-500 text-xs font-bold mt-2 animate-pulse">{locError}</p>
+              )}
+
+              {/* Daftar Scrollable */}
+              <div className="mt-3 h-56 overflow-y-auto border-2 border-slate-100 rounded-xl bg-slate-50 p-1.5 space-y-1 shadow-inner">
+                {filteredLocations.length > 0 ? (
+                  filteredLocations.map(loc => {
+                    const isSelected = selectedLocId === loc.id.toString()
+                    return (
+                      <div
+                        key={loc.id}
+                        onClick={() => {
+                          setSelectedLocId(loc.id.toString())
+                          setLocError('') 
+                        }}
+                        className={`cursor-pointer p-3 rounded-lg flex items-center justify-between border-2 transition-all ${isSelected
+                          ? 'bg-blue-50 border-blue-500 shadow-sm'
+                          : 'border-transparent hover:bg-slate-200'
+                          }`}
+                      >
+                        <div>
+                          <p className={`font-bold text-sm ${isSelected ? 'text-blue-800' : 'text-slate-700'}`}>{loc.name}</p>
+                          {loc.barcode && <p className="text-xs font-mono text-slate-500">{loc.barcode}</p>}
+                        </div>
+                        {isSelected && <CheckCircle2 size={18} className="text-blue-600" />}
+                      </div>
+                    )
+                  })
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-2 py-6">
+                    <Search size={24} className="text-slate-300" />
+                    <p className="text-sm font-medium">Lokasi tidak ditemukan</p>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
               <Button variant="secondary" onClick={() => setModalData(null)}>Batal</Button>
-              <Button onClick={handleAddToCache} disabled={!selectedLocId} className="bg-slate-800 hover:bg-slate-900 text-white flex items-center gap-2 px-6 py-2.5">
+              <Button onClick={handleAddToCache} className="bg-slate-800 hover:bg-slate-900 text-white flex items-center gap-2 px-6 py-2.5">
                 <CheckCircle2 size={18} /> Konfirmasi Lokasi
               </Button>
             </div>
@@ -422,23 +489,24 @@ export default function PutawayTab({
         </Modal>
       )}
 
-      {/* Modal Review Akhir (VIEW-ONLY Table) */}
+      {/* Modal Review Akhir */}
       {showReview && (
         <Modal onClose={() => setShowReview(false)} title="Review Antrean Putaway" className="w-[90vw] max-w-5xl">
           <div className="max-h-[60vh] overflow-y-auto border border-slate-200 rounded-xl">
             <table className="w-full text-left border-collapse">
-              <thead className="bg-slate-50 border-b border-slate-200">
+              <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-semibold">
                 <tr>
-                  <th className="p-4 text-xs font-semibold text-slate-600 uppercase w-32">Pallet ID</th>
-                  <th className="p-4 text-xs font-semibold text-slate-600 uppercase">Produk</th>
-                  <th className="p-4 text-xs font-semibold text-slate-600 uppercase text-center w-32">Rak Tujuan</th>
-                  <th className="p-4 text-xs font-semibold text-slate-600 uppercase text-center w-28">Total Qty</th>
-                  <th className="p-4 text-xs font-semibold text-slate-600 uppercase text-center w-16">Aksi</th>
+                  <th className="px-6 py-4">Pallet ID</th>
+                  <th className="px-6 py-4">Product Code</th>
+                  <th className="px-6 py-4">Product Name</th>
+                  <th className="px-6 py-4 text-center">Qty</th>
+                  <th className="px-6 py-4 text-center">Lokasi</th>
+                  <th className="px-6 py-4 text-right"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {putawayCache.length === 0 ? (
-                  <tr><td colSpan={5} className="p-4 text-center text-slate-500">Antrean kosong</td></tr>
+                  <tr><td colSpan={6} className="p-4 text-center text-slate-500">Antrean kosong</td></tr>
                 ) : (
                   putawayCache.map((item, idx) => (
                     <tr key={idx} className={`hover:bg-slate-50 ${item.is_damage ? 'bg-red-50/30' : ''}`}>
@@ -446,17 +514,19 @@ export default function PutawayTab({
                         {item.pallet_id}
                         {item.is_damage && <span className="block mt-1 text-[10px] text-red-600 font-bold tracking-wider">⚠ RUSAK</span>}
                       </td>
+                      <td className='pl-5'>
+                        <p className="font-semibold text-slate-800">{item.product_code}</p> 
+                      </td>
                       <td className="p-4">
                         <p className="font-semibold text-slate-800">{item.product_name}</p>
-                        <p className="text-xs text-slate-500 font-mono mt-0.5">{item.product_code}</p>
+                      </td>
+                      <td className="p-4 text-center font-bold text-slate-700 text-md">
+                        {item.qty}
                       </td>
                       <td className="p-4 text-center">
-                        <span className="px-3 py-1 bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded-lg text-sm">
+                        <span className="px-3 py-1 bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded-lg text-md">
                           {item.location_name}
                         </span>
-                      </td>
-                      <td className="p-4 text-center font-black text-slate-700 text-lg">
-                        {item.qty}
                       </td>
                       <td className="p-4 text-center">
                         <button onClick={() => setPutawayCache(prev => prev.filter((_, i) => i !== idx))} className="p-2 text-slate-400 hover:bg-red-100 hover:text-red-600 rounded-lg transition-colors">

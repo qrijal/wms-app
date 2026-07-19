@@ -27,18 +27,21 @@ export async function POST(
     }
 
     // 2. Ambil data putaway dengan join yang lebih sederhana
+    // 2. Ambil data putaway dengan relasi yang sesuai skema
     const { data: putawayItems, error: putawayErr } = await supabase
       .from('inbound_putaway_detail')
       .select(`
         qty,
         location_id,
-        inbound_receiving_detail!inner(
+        inbound_receiving_detail!inner (
           is_damage,
+          pallet_id,
           inbound_detail_id,
-          inbound_detail!inner(
+          inbound_detail!inner (
+            header_id,
             product_id,
             product_code,
-            pallet_id
+            batch_number 
           )
         )
       `)
@@ -57,22 +60,19 @@ export async function POST(
       const inboundReceivingDetail = Array.isArray(item.inbound_receiving_detail)
         ? item.inbound_receiving_detail[0]
         : item.inbound_receiving_detail
-      const productId = inboundReceivingDetail?.inbound_detail?.[0]?.product_id
+
+      const inbDetail = inboundReceivingDetail?.inbound_detail as any
+      const productId = Array.isArray(inbDetail) ? inbDetail[0]?.product_id : inbDetail?.product_id
+      const palletId = inboundReceivingDetail?.pallet_id
+
       if (!productId) {
         console.error('Missing product_id in item:', item)
-        continue // lewati item yang tidak valid
+        continue
       }
+
       const isDamage = inboundReceivingDetail?.is_damage ?? false
 
-      console.log('Upserting inventory:', {
-        warehouse: header.warehouse_id,
-        product: productId,
-        location: item.location_id,
-        qty: item.qty,
-        isDamage,
-        inbound_header_id: headerId,
-      })
-
+      // Mengirim ke database
       const { error: rpcErr } = await supabase.rpc('upsert_inventory', {
         p_warehouse_id: header.warehouse_id,
         p_product_id: productId,
@@ -80,6 +80,7 @@ export async function POST(
         p_qty_change: item.qty,
         p_is_damage: isDamage,
         p_inbound_header_id: headerId,
+        p_pallet_id: palletId || '',
       })
 
       if (rpcErr) {

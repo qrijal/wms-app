@@ -47,7 +47,6 @@ export const adminMenu = [
       { label: 'Locations', icon: MapPin, path: '/master-location' },
     ],
   },
-  { label: 'Master Location', icon: MapPin, path: '/master-location' },
   {
     label: 'Transaksi',
     icon: ArrowDownUp,

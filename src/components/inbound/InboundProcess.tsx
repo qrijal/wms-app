@@ -162,6 +162,7 @@ export default function InboundProcess({
             details={currentDetails}
             currentStatus={currentStatus}
             onRefresh={refreshData}
+            status={header.status}
           />
         )}
       </div>

@@ -1,330 +1,151 @@
 'use client'
-import { useState, useEffect } from 'react'
-import Alert from '@/components/ui/Alert'
-import Modal from '@/components/ui/Modal'
-import Button from '@/components/ui/Button'
-import { CheckCircle2, PackageCheck, AlertTriangle, FileText, MapPin } from 'lucide-react'
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-interface ReceivingDetail {
-  id: number
-  pallet_id: string // Ditambahkan agar bisa menampilkan ID Pallet
-  qty_received: number
-  is_damage: boolean
-}
-
-interface PutawayDetail {
-  id: number
-  receiving_detail_id: number
-  location_id: number
-  qty: number
-  dim_location?: { name: string; barcode: string }
-}
-
-interface DetailItem {
-  id: number
-  product_code: string
-  qty: number
-  qty_received: number
-  qty_putaway: number
-  dim_products?: { name: string; uom?: { name: string } | null }
-  receiving_details?: ReceivingDetail[]
-  putaway_details?: PutawayDetail[]
-}
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import toast from 'react-hot-toast'
 
 interface GrnTabProps {
-  headerId: number
-  details: DetailItem[]
-  currentStatus: string
-  onRefresh: () => void
+  headerId: string
+  status: string 
+  details: any[] 
+  onRefresh?: () => Promise<void> | void
 }
 
-export default function GrnTab({ headerId, details, currentStatus, onRefresh }: GrnTabProps) {
-  const [status, setStatus] = useState(currentStatus || '')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
-  const [showConfirm, setShowConfirm] = useState(false)
+export default function GrnTab({ headerId, status, details, onRefresh }: GrnTabProps) {
+  const router = useRouter()
+  const [isLoading, setIsLoading] = useState(false)
 
-  useEffect(() => {
-    if (currentStatus) setStatus(currentStatus)
-  }, [currentStatus])
+  // Flatten data untuk ditampilkan di tabel
+  const tableData = details.flatMap((detail) => {
+    return (detail.receiving_details || []).map((rec: any) => ({
+      id: rec.id,
+      product_code: detail.product_code,
+      product_name: detail.dim_products?.name || '-',
+      batch_number: detail.batch_number || '-',
+      expired_date: detail.expired_date || '-',
+      pallet_id: rec.pallet_id || '-',
+      qty: rec.qty_received,
+      is_damage: rec.is_damage,
+    }))
+  })
 
-  // ─── Logika Kalkulasi Akurat (Berdasarkan Qty Fisik) ───────────────────────
-  const totalOrdered = details.reduce((sum, d) => sum + d.qty, 0)
-  const totalReceived = details.reduce((sum, d) => sum + (d.qty_received || 0), 0)
-  const totalPutaway = details.reduce((sum, d) => sum + (d.qty_putaway || 0), 0)
+  const handleSubmitGRN = async () => {
+    setIsLoading(true)
 
-  // GRN baru bisa ditekan jika ada barang yang di-receive, dan SEMUA yang di-receive sudah di-putaway
-  const isReadyForGrn = totalReceived > 0 && totalPutaway >= totalReceived
-  const progressPercent = totalReceived > 0 ? Math.min((totalPutaway / totalReceived) * 100, 100) : 0
-
-  // ─── Flattening Data (Mengekstrak per Pallet ID) ───────────────────────────
-  // Kita urai data dari level Produk -> level Pallet -> level Lokasi Rak
-  const finalCheckList = details.flatMap(detail => {
-    const recvDetails = detail.receiving_details || [];
-    const putDetails = detail.putaway_details || [];
-    const uomName = detail.dim_products?.uom?.name || 'unit';
-
-    return recvDetails.flatMap(recv => {
-      const relatedPutaways = putDetails.filter(p => p.receiving_detail_id === recv.id);
-
-      // Jika pallet ini sudah di-receive tapi belum sempat masuk rak (putaway)
-      if (relatedPutaways.length === 0) {
-        return [{
-          unique_key: `recv-${recv.id}`,
-          pallet_id: recv.pallet_id || '-',
-          product_code: detail.product_code,
-          product_name: detail.dim_products?.name || '-',
-          qty: recv.qty_received,
-          uom: uomName,
-          location: 'Belum Dialokasikan',
-          is_damage: recv.is_damage,
-          is_ready: false
-        }];
-      }
-
-      // Jika pallet sudah masuk rak (bisa 1 pallet utuh, atau dipecah ke beberapa rak)
-      return relatedPutaways.map(p => ({
-        unique_key: `put-${p.id}`,
-        pallet_id: recv.pallet_id || '-',
-        product_code: detail.product_code,
-        product_name: detail.dim_products?.name || '-',
-        qty: p.qty,
-        uom: uomName,
-        location: p.dim_location?.name || `Rak ${p.location_id}`,
-        is_damage: recv.is_damage,
-        is_ready: true
-      }));
-    });
-  });
-
-  // ─── Actions ───────────────────────────────────────────────────────────────
-  const handleGrn = async () => {
-    setShowConfirm(false)
-    setLoading(true)
-    setError('')
     try {
-      const res = await fetch(`/api/inbound/header/${headerId}/grn`, { method: 'POST' })
-      if (!res.ok) {
-        const data = await res.json()
-        throw new Error(data.error || 'Gagal memproses GRN')
+      const res = await fetch(`/api/inbound/header/${headerId}/grn`, {
+        method: 'POST',
+      })
+      const data = await res.json()
+
+      if (!res.ok) throw new Error(data.error || 'Failed to submit GRN')
+
+      toast.success('GRN has been successfully submitted!')
+      
+      if (onRefresh) {
+        await onRefresh()
+      } else {
+        router.refresh() 
       }
-      setSuccess('GRN berhasil dibuat! Stok telah ditambahkan ke sistem.')
-      onRefresh()
-    } catch (err: any) {
-      setError(err.message)
+      
+    } catch (error: any) {
+      toast.error(error.message || 'An error occurred while submitting GRN')
     } finally {
-      setLoading(false)
+      setIsLoading(false)
     }
   }
 
-  // ─── Renders ───────────────────────────────────────────────────────────────
-  if (status === 'CANCELED') {
-    return (
-      <div className="space-y-6 print:m-0 print:p-0">
-        <div className="p-6 bg-red-50 border border-red-200 rounded-xl text-red-700 font-semibold text-center flex items-center justify-center gap-2">
-          <AlertTriangle size={20} /> Dokumen telah dibatalkan. Laporan penerimaan tidak berlaku.
-        </div>
-      </div>
-    )
-  }
-  const isDone = status === 'GRN' || status === 'COMPLETED'
-
   return (
-    <div className="space-y-6">
-      {error && <Alert type="error" message={error} onClose={() => setError('')} />}
-      {success && <Alert type="success" message={success} onClose={() => setSuccess('')} />}
-
-      {isDone ? (
-        <div className="p-6 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 flex flex-col sm:flex-row items-center sm:justify-start justify-center gap-4 shadow-sm text-center sm:text-left">
-          <CheckCircle2 size={32} className="text-emerald-600 shrink-0" />
-          <div>
-            <h3 className="font-bold text-xl">Goods Received Note (GRN) Selesai</h3>
-            <p className="text-sm text-emerald-700/90 mt-1">Dokumen inbound telah dikunci dan stok barang fisik sudah resmi ditambahkan ke dalam database WMS.</p>
-          </div>
-          <div className="sm:ml-auto mt-2 sm:mt-0">
-            <Button onClick={() => window.print()} variant="secondary" className="bg-white border-emerald-300 text-emerald-700 hover:bg-emerald-100 font-bold">
-              Cetak Bukti GRN
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 print:hidden">
-          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
-            <div className="flex items-start gap-3">
-              <div className="p-2.5 bg-blue-50 text-blue-600 rounded-lg shrink-0">
-                <FileText size={24} />
-              </div>
-              <div>
-                <h3 className="font-bold text-lg text-slate-800">Review & Terbitkan GRN</h3>
-                <p className="text-sm text-slate-500">Pengecekan final fisik pallet vs lokasi rak sebelum menutup Inbound.</p>
-              </div>
-            </div>
-
-            <div className="text-left sm:text-right shrink-0 bg-slate-50 px-4 py-2 rounded-lg border border-slate-100">
-              <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-0.5">Total Diterima</p>
-              <p className="text-xl font-black text-slate-800">{totalReceived} <span className="text-sm font-medium text-slate-500">unit</span></p>
-            </div>
-          </div>
-
-          <div className="mb-6">
-            <div className="flex justify-between text-sm font-semibold mb-2">
-              <span className={progressPercent === 100 ? 'text-emerald-600' : 'text-blue-600'}>
-                Progress Lokasi Pallet (Putaway)
+    <div className="w-full bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+      {/* Header & Button Section */}
+      <div className="px-6 py-5 flex justify-between items-center">
+        <h2 className="text-lg font-semibold text-slate-800">Goods Receipt Note (GRN)</h2>
+        
+        {/* Tombol HANYA muncul jika status BUKAN GRN */}
+        {status !== 'GRN' && (
+          <button
+            onClick={handleSubmitGRN}
+            disabled={isLoading || tableData.length === 0}
+            className="px-4 py-2.5 bg-[#1c2434] text-white rounded-md hover:bg-slate-800 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2 text-sm font-medium transition-colors"
+          >
+            {isLoading ? (
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Processing...
               </span>
-              <span className="text-slate-700">{totalPutaway} / {totalReceived} Dialokasikan</span>
-            </div>
-            <div className="h-3 bg-slate-100 rounded-full overflow-hidden border border-slate-200/50">
-              <div
-                className={`h-full rounded-full transition-all duration-700 ${progressPercent === 100 ? 'bg-emerald-500' : 'bg-blue-500'}`}
-                style={{ width: `${progressPercent}%` }}
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end pt-4 border-t border-slate-100">
-            <Button
-              onClick={() => setShowConfirm(true)}
-              disabled={loading || !isReadyForGrn}
-              className="px-8 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:text-slate-500 font-bold text-white flex items-center gap-2"
-            >
-              <PackageCheck size={18} />
-              {loading ? 'Memproses...' : 'Terbitkan Dokumen GRN'}
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Tabel Detail Final Checking (Per Pallet) */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center print:hidden">
-          <div>
-            <h3 className="font-semibold text-slate-800 text-lg">Daftar Pengecekan Fisik Pallet</h3>
-            <p className="text-xs text-slate-500 mt-1">Cocokkan ID Pallet fisik dengan lokasi rak yang tertera di bawah ini.</p>
-          </div>
-          <div className="text-sm font-bold text-slate-600 bg-white px-3 py-1.5 rounded-lg border border-slate-200">
-            Total Pallet: {finalCheckList.length}
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-semibold">
-              <tr>
-                <th className="px-6 py-4 w-40">Pallet ID</th>
-                <th className="px-6 py-4">Deskripsi Produk & SKU</th>
-                <th className="px-6 py-4 text-center">Kondisi</th>
-                <th className="px-6 py-4 text-center">Lokasi Rak</th>
-                <th className="px-6 py-4 text-center w-32">Qty</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-sm">
-              {finalCheckList.length === 0 ? (
-                <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-500 italic">Belum ada barang yang melalui tahap Receiving.</td></tr>
-              ) : (
-                finalCheckList.map((row) => (
-                  <tr key={row.unique_key} className={`hover:bg-slate-50 transition-colors ${row.is_damage ? 'bg-red-50/30' : ''}`}>
-                    <td className="px-6 py-4 font-mono font-bold text-slate-700">
-                      <span className="px-2 py-1 bg-slate-100 border border-slate-200 rounded">{row.pallet_id}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <p className="font-semibold text-slate-800">{row.product_name}</p>
-                      <p className="text-xs text-slate-500 font-mono mt-0.5">{row.product_code}</p>
-                    </td>
-                    <td className="px-6 py-4 text-center">
-                      {row.is_damage ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded border border-red-200">
-                          <AlertTriangle size={12} /> RUSAK
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-200">
-                          <CheckCircle2 size={12} /> BAGUS
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 text-center">
-                      {row.is_ready ? (
-                        <span className="inline-flex items-center gap-1 font-bold text-slate-700 bg-slate-100 px-3 py-1 rounded-lg border border-slate-200">
-                          <MapPin size={14} className="text-slate-400" /> {row.location}
-                        </span>
-                      ) : (
-                        <span className="text-xs font-bold text-amber-600 bg-amber-50 px-2 py-1 rounded border border-amber-200">
-                          {row.location}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 text-center">
-                      <span className="font-black text-slate-800 text-base">{row.qty}</span> <span className="text-xs font-normal text-slate-500">{row.uom}</span>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+            ) : (
+              <>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                  <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                  <polyline points="7 3 7 8 15 8"></polyline>
+                </svg>
+                Submit GRN
+              </>
+            )}
+          </button>
+        )}
       </div>
 
-      {/* Modal Konfirmasi Pengecekan Final */}
-      {showConfirm && (
-        <Modal onClose={() => setShowConfirm(false)} title="Konfirmasi Final GRN" className="w-[90vw] max-w-5xl">
-          <div className="space-y-4">
-            {/* Warning Alert */}
-            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-3">
-              <PackageCheck className="text-emerald-600 mt-0.5 shrink-0" size={24} />
-              <div>
-                <p className="text-emerald-800 font-bold text-lg">Apakah hasil pengecekan fisik sudah sesuai?</p>
-                <p className="text-emerald-700/80 text-sm mt-1">Pastikan data di bawah ini sudah akurat. Dokumen yang telah di-GRN tidak dapat diedit kembali dan stok akan otomatis bertambah ke dalam lokasi rak yang tertera.</p>
-              </div>
-            </div>
-
-            {/* Tabel Mini Preview di dalam Modal */}
-            <div className="border border-slate-200 rounded-xl overflow-hidden max-h-[45vh] flex flex-col bg-white">
-              <div className="overflow-y-auto">
-                <table className="w-full text-left text-sm border-collapse">
-                  <thead className="bg-slate-50 text-slate-600 font-semibold sticky top-0 border-b border-slate-200 shadow-sm">
-                    <tr>
-                      <th className="p-3 w-36">Pallet ID</th>
-                      <th className="p-3">Produk</th>
-                      <th className="p-3 text-center">Lokasi Rak</th>
-                      <th className="p-3 text-center w-24">Qty</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {finalCheckList.map((row) => (
-                      <tr key={`modal-${row.unique_key}`} className={row.is_damage ? 'bg-red-50/20' : ''}>
-                        <td className="p-3 font-mono font-bold text-slate-700">
-                          {row.pallet_id}
-                          {row.is_damage && <span className="block mt-1 text-[9px] text-red-600 tracking-wider">⚠ RUSAK</span>}
-                        </td>
-                        <td className="p-3">
-                          <p className="font-semibold text-slate-800 truncate max-w-[250px]">{row.product_name}</p>
-                          <p className="text-xs text-slate-500 font-mono mt-0.5">{row.product_code}</p>
-                        </td>
-                        <td className="p-3 text-center">
-                          <span className="font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded text-xs border border-slate-200">
-                            {row.location}
-                          </span>
-                        </td>
-                        <td className="p-3 text-center font-black text-slate-800">
-                          {row.qty}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
-              <Button variant="secondary" onClick={() => setShowConfirm(false)} className="px-6">Batal, Cek Ulang</Button>
-              <Button onClick={handleGrn} disabled={loading} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-8">
-                {loading ? 'Menyimpan...' : 'Ya, Semua Sesuai - Terbitkan GRN'}
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
+      {/* Tabel */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="border-y border-gray-100 bg-slate-50/50">
+              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Product Code</th>
+              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Product Name</th>
+              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Batch</th>
+              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Expired Date</th>
+              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Pallet ID</th>
+              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Qty</th>
+              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {tableData.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-6 py-8 text-center text-slate-500 text-sm">
+                  No items received yet.
+                </td>
+              </tr>
+            ) : (
+              tableData.map((row, idx) => (
+                <tr key={`${row.id}-${idx}`} className="hover:bg-slate-50/50 transition-colors">
+                  <td className="px-6 py-4 text-sm text-slate-600">{row.product_code}</td>
+                  <td className="px-6 py-4 text-sm text-slate-800 font-medium">{row.product_name}</td>
+                  <td className="px-6 py-4 text-sm text-slate-600">{row.batch_number}</td>
+                  <td className="px-6 py-4 text-sm text-slate-600">{row.expired_date}</td>
+                  <td className="px-6 py-4 text-sm text-slate-600">{row.pallet_id}</td>
+                  <td className="px-6 py-4 text-sm font-semibold text-blue-600 text-center">{row.qty}</td>
+                  <td className="px-6 py-4 text-center">
+                    {row.is_damage ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-red-50 text-red-600 border border-red-200">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="10"></circle>
+                          <line x1="15" y1="9" x2="9" y2="15"></line>
+                          <line x1="9" y1="9" x2="15" y2="15"></line>
+                        </svg>
+                        Damaged
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-600 border border-emerald-200">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                          <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                        </svg>
+                        Good
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
